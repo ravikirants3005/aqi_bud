@@ -17,63 +17,96 @@ class InsightsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dashboardAsync = ref.watch(exposureDashboardProvider);
+    final trendsAsync = ref.watch(aqiTrendsProvider);
+    final currentAqiAsync = ref.watch(currentAqiProvider);
 
     return Scaffold(
+      backgroundColor: const Color(0xFF081217),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF12242B),
+        foregroundColor: Colors.white,
         title: const Text('Exposure Insights'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
         ),
       ),
-      body: dashboardAsync.when(
-        data: (dashboard) {
-          if (dashboard == null) {
-            return const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Text(
-                  'Enable location access to generate your exposure dashboard.',
-                  textAlign: TextAlign.center,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF081217), Color(0xFF0D1A21), Color(0xFF122A34)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: dashboardAsync.when(
+          data: (dashboard) {
+            if (dashboard == null) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    'Enable location access to generate your exposure dashboard.',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              );
+            }
+
+            final weeklyTrend =
+                trendsAsync.valueOrNull?['week'] ?? const <AqiTrendDay>[];
+            final monthlyTrend =
+                trendsAsync.valueOrNull?['month'] ?? const <AqiTrendDay>[];
+            final trackedLocation =
+                _trackedLocationLabel(currentAqiAsync.valueOrNull);
+
+            return RefreshIndicator(
+              onRefresh: () async {
+                ref.invalidate(currentAqiProvider);
+                ref.invalidate(aqiHourlyHistoryProvider);
+                ref.invalidate(aqiTrendsProvider);
+                ref.invalidate(exposureDashboardProvider);
+              },
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1180),
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      _TodayExposureCard(dashboard: dashboard),
+                      const SizedBox(height: 16),
+                      if (dashboard.alerts.isNotEmpty) ...[
+                        _AlertsCard(alerts: dashboard.alerts),
+                        const SizedBox(height: 16),
+                      ],
+                      _WeeklyPatternCard(
+                        trend: weeklyTrend,
+                        trackedLocation: trackedLocation,
+                      ),
+                      const SizedBox(height: 16),
+                      _MonthlyTrendCard(
+                        trend: monthlyTrend,
+                        trackedLocation: trackedLocation,
+                      ),
+                      const SizedBox(height: 16),
+                      _LocationInsightsCard(insights: dashboard.locationInsights),
+                      const SizedBox(height: 16),
+                      _SuggestionsCard(suggestions: dashboard.suggestions),
+                    ],
+                  ),
                 ),
               ),
             );
-          }
-
-          return RefreshIndicator(
-            onRefresh: () async {
-              ref.invalidate(currentAqiProvider);
-              ref.invalidate(aqiTrendsProvider);
-              ref.invalidate(exposureDashboardProvider);
-            },
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              children: [
-                _TodayExposureCard(dashboard: dashboard),
-                const SizedBox(height: 16),
-                if (dashboard.alerts.isNotEmpty) ...[
-                  _AlertsCard(alerts: dashboard.alerts),
-                  const SizedBox(height: 16),
-                ],
-                _WeeklyPatternCard(dashboard: dashboard),
-                const SizedBox(height: 16),
-                _MonthlyTrendCard(dashboard: dashboard),
-                const SizedBox(height: 16),
-                _LocationInsightsCard(insights: dashboard.locationInsights),
-                const SizedBox(height: 16),
-                _SuggestionsCard(suggestions: dashboard.suggestions),
-              ],
-            ),
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stackTrace) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'Unable to load exposure insights.\n$error',
-              textAlign: TextAlign.center,
+          },
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (error, stackTrace) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                'Unable to load exposure insights.\n$error',
+                textAlign: TextAlign.center,
+              ),
             ),
           ),
         ),
@@ -171,23 +204,30 @@ class _TodayExposureCard extends StatelessWidget {
 }
 
 class _WeeklyPatternCard extends StatelessWidget {
-  const _WeeklyPatternCard({required this.dashboard});
+  const _WeeklyPatternCard({
+    required this.trend,
+    required this.trackedLocation,
+  });
 
-  final ExposureDashboardData dashboard;
+  final List<AqiTrendDay> trend;
+  final String? trackedLocation;
 
   @override
   Widget build(BuildContext context) {
-    final weeklyExposure = dashboard.weeklyExposure;
-    if (weeklyExposure.length < 2) {
-      return const _EmptyTrendCard(
+    if (trend.length < 2) {
+      return _EmptyTrendCard(
         title: 'Weekly AQI Pattern',
-        message:
-            'We need a bit more history before the weekly pattern becomes meaningful.',
+        message: trackedLocation == null
+            ? 'We need a bit more AQI history before the weekly pattern becomes meaningful.'
+            : 'We need a bit more AQI history for $trackedLocation before the weekly pattern becomes meaningful.',
       );
     }
 
-    final maxScore = weeklyExposure
-        .map((record) => record.score)
+    final highAqiDays = trend.where((day) => day.maxAqi >= 150).length;
+    final bestDay = trend.reduce((a, b) => a.maxAqi <= b.maxAqi ? a : b);
+    final worstDay = trend.reduce((a, b) => a.maxAqi >= b.maxAqi ? a : b);
+    final maxAqi = trend
+        .map((day) => day.maxAqi)
         .reduce((a, b) => a > b ? a : b);
 
     return Card(
@@ -201,8 +241,18 @@ class _WeeklyPatternCard extends StatelessWidget {
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
+            if (trackedLocation != null) ...[
+              Text(
+                'Tracking: $trackedLocation',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             Text(
-              '${dashboard.highAqiDays} high-AQI day${dashboard.highAqiDays == 1 ? '' : 's'} in the last 7 days',
+              '$highAqiDays high-AQI day${highAqiDays == 1 ? '' : 's'} in the last 7 days',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -214,7 +264,7 @@ class _WeeklyPatternCard extends StatelessWidget {
                   child: _SummaryStat(
                     label: 'Best day',
                     value:
-                        '${DateFormat('EEE').format(dashboard.bestDay.date)} | ${dashboard.bestDay.maxAqi}',
+                        '${DateFormat('EEE').format(bestDay.date)} | ${bestDay.maxAqi}',
                     color: Colors.green,
                   ),
                 ),
@@ -223,7 +273,7 @@ class _WeeklyPatternCard extends StatelessWidget {
                   child: _SummaryStat(
                     label: 'Worst day',
                     value:
-                        '${DateFormat('EEE').format(dashboard.worstDay.date)} | ${dashboard.worstDay.maxAqi}',
+                        '${DateFormat('EEE').format(worstDay.date)} | ${worstDay.maxAqi}',
                     color: Theme.of(context).colorScheme.error,
                   ),
                 ),
@@ -235,12 +285,12 @@ class _WeeklyPatternCard extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: weeklyExposure.map((record) {
-                  final barHeight = maxScore == 0
+                children: trend.map((day) {
+                  final barHeight = maxAqi == 0
                       ? 18.0
-                      : (record.score / maxScore * 90).clamp(18.0, 90.0);
-                  final barColor = Color(aqiToCategory(record.maxAqi).colorValue);
-                  final isHighAqi = record.maxAqi >= 150;
+                      : (day.maxAqi / maxAqi * 90).clamp(18.0, 90.0);
+                  final barColor = Color(aqiToCategory(day.maxAqi).colorValue);
+                  final isHighAqi = day.maxAqi >= 150;
 
                   return Expanded(
                     child: Padding(
@@ -249,7 +299,7 @@ class _WeeklyPatternCard extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           Text(
-                            record.score.toStringAsFixed(0),
+                            '${day.maxAqi}',
                             style: const TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
@@ -269,7 +319,7 @@ class _WeeklyPatternCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            DateFormat('E').format(record.date),
+                            DateFormat('E').format(day.date),
                             style: const TextStyle(fontSize: 11),
                           ),
                         ],
@@ -287,25 +337,33 @@ class _WeeklyPatternCard extends StatelessWidget {
 }
 
 class _MonthlyTrendCard extends StatelessWidget {
-  const _MonthlyTrendCard({required this.dashboard});
+  const _MonthlyTrendCard({
+    required this.trend,
+    required this.trackedLocation,
+  });
 
-  final ExposureDashboardData dashboard;
+  final List<AqiTrendDay> trend;
+  final String? trackedLocation;
 
   @override
   Widget build(BuildContext context) {
-    final monthlyExposure = dashboard.monthlyExposure;
-    if (monthlyExposure.length < 2) {
-      return const _EmptyTrendCard(
+    if (trend.length < 2) {
+      return _EmptyTrendCard(
         title: '30-Day AQI Trend',
-        message:
-            'Monthly trend data is not available yet. Keep using the app and refresh after location data loads.',
+        message: trackedLocation == null
+            ? 'Monthly AQI history is not available yet.'
+            : 'Monthly AQI history for $trackedLocation is not available yet.',
       );
     }
 
     final spots = <FlSpot>[];
-    for (var i = 0; i < monthlyExposure.length; i++) {
-      spots.add(FlSpot(i.toDouble(), monthlyExposure[i].score));
+    for (var i = 0; i < trend.length; i++) {
+      spots.add(FlSpot(i.toDouble(), trend[i].avgAqi.toDouble()));
     }
+    final maxAqi = trend.map((day) => day.maxAqi).reduce((a, b) => a > b ? a : b);
+    final maxY =
+        (((maxAqi + 24) ~/ 25) * 25).toDouble().clamp(100.0, 500.0).toDouble();
+    final interval = maxY <= 100 ? 20.0 : (maxY / 5).ceilToDouble();
 
     return Card(
       child: Padding(
@@ -318,8 +376,18 @@ class _MonthlyTrendCard extends StatelessWidget {
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
+            if (trackedLocation != null) ...[
+              Text(
+                'Tracking: $trackedLocation',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             Text(
-              dashboard.monthlyPatternInsight,
+              _monthlyAqiInsight(trend),
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -330,10 +398,10 @@ class _MonthlyTrendCard extends StatelessWidget {
               child: LineChart(
                 LineChartData(
                   minY: 0,
-                  maxY: 100,
+                  maxY: maxY,
                   gridData: FlGridData(
                     show: true,
-                    horizontalInterval: 20,
+                    horizontalInterval: interval,
                     getDrawingHorizontalLine: (value) => FlLine(
                       color: Theme.of(context)
                           .colorScheme
@@ -354,7 +422,7 @@ class _MonthlyTrendCard extends StatelessWidget {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 30,
-                        interval: 20,
+                        interval: interval,
                         getTitlesWidget: (value, meta) => Text(
                           value.toInt().toString(),
                           style: const TextStyle(fontSize: 10),
@@ -367,13 +435,13 @@ class _MonthlyTrendCard extends StatelessWidget {
                         interval: 5,
                         getTitlesWidget: (value, meta) {
                           final index = value.toInt();
-                          if (index < 0 || index >= monthlyExposure.length) {
+                          if (index < 0 || index >= trend.length) {
                             return const SizedBox.shrink();
                           }
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
-                              DateFormat('d').format(monthlyExposure[index].date),
+                              DateFormat('d').format(trend[index].date),
                               style: const TextStyle(fontSize: 10),
                             ),
                           );
@@ -390,7 +458,7 @@ class _MonthlyTrendCard extends StatelessWidget {
                       dotData: FlDotData(
                         show: true,
                         getDotPainter: (spot, percent, bar, index) {
-                          final record = monthlyExposure[index];
+                          final record = trend[index];
                           return FlDotCirclePainter(
                             radius: 2.6,
                             color: Color(aqiToCategory(record.maxAqi).colorValue),
@@ -745,4 +813,24 @@ class _EmptyTrendCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _trackedLocationLabel(AqiData? data) {
+  if (data == null) return null;
+  final label = data.locationName?.trim();
+  if (label != null && label.isNotEmpty) {
+    return label;
+  }
+  return '${data.lat.toStringAsFixed(3)}, ${data.lng.toStringAsFixed(3)}';
+}
+
+String _monthlyAqiInsight(List<AqiTrendDay> trend) {
+  if (trend.isEmpty) return 'Not enough AQI history yet.';
+
+  final averageAqi =
+      trend.map((day) => day.avgAqi).reduce((a, b) => a + b) / trend.length;
+  final worstDay = trend.reduce((a, b) => a.maxAqi >= b.maxAqi ? a : b);
+  final bestDay = trend.reduce((a, b) => a.maxAqi <= b.maxAqi ? a : b);
+
+  return 'Average daily AQI is ${averageAqi.toStringAsFixed(0)}. Best day: ${DateFormat('d MMM').format(bestDay.date)} (${bestDay.maxAqi}), worst day: ${DateFormat('d MMM').format(worstDay.date)} (${worstDay.maxAqi}).';
 }

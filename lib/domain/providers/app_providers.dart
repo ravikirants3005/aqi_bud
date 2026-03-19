@@ -91,11 +91,18 @@ final currentAqiProvider = FutureProvider<AqiData?>((ref) async {
   return repo.getCurrentAqi(pos.latitude, pos.longitude);
 });
 
-final aqiTrendsProvider = FutureProvider<Map<String, List<AqiTrendDay>>>((ref) async {
+final aqiHourlyHistoryProvider = FutureProvider<List<AqiHourlyPoint>>((ref) async {
   final pos = await ref.watch(locationProvider.future);
-  if (pos == null) return {'week': [], 'month': []};
+  if (pos == null) return const <AqiHourlyPoint>[];
   final repo = ref.watch(aqiRepoProvider);
-  return repo.getAqiTrends(pos.latitude, pos.longitude);
+  return repo.getAqiHistory(pos.latitude, pos.longitude);
+});
+
+final aqiTrendsProvider = FutureProvider<Map<String, List<AqiTrendDay>>>((ref) async {
+  final history = await ref.watch(aqiHourlyHistoryProvider.future);
+  if (history.isEmpty) return {'week': [], 'month': []};
+  final repo = ref.watch(aqiRepoProvider);
+  return repo.buildTrendsFromHistory(history);
 });
 
 final exposureDashboardProvider =

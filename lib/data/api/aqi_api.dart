@@ -15,7 +15,7 @@ class AqiApi {
   AqiApi({RuntimeConfig? config}) : _config = config ?? RuntimeConfig.fallback;
 
   static const _openMeteoBaseUrl =
-      'https://air-quality.api.open-meteo.com/v1/air-quality';
+      'https://air-quality-api.open-meteo.com/v1/air-quality';
   static const _openAqBaseUrl = 'https://api.openaq.org/v3';
   static const _nominatimBaseUrl =
       'https://nominatim.openstreetmap.org/reverse';
@@ -53,7 +53,7 @@ class AqiApi {
           : (aqiRaw is num ? aqiRaw.toInt() : 50);
 
       return AqiData(
-        aqi: aqi.clamp(0, 500),
+        aqi: aqi.clamp(0, 500).toInt(),
         lat: lat,
         lng: lng,
         timestamp: DateTime.now(),
@@ -70,44 +70,60 @@ class AqiApi {
     double lat,
     double lng,
   ) async {
+    final history = await fetchAqiHistory(lat, lng, days: 30);
+    return _buildTrendBuckets(history);
+  }
+
+  Future<List<AqiHourlyPoint>> fetchAqiHistory(
+    double lat,
+    double lng, {
+    int days = 30,
+  }) async {
+    if (_config.aqiProvider == 'openaq' && _config.aqiApiKey.isNotEmpty) {
+      final liveHistory = await _fetchAqiHistoryFromOpenAq(
+        lat,
+        lng,
+        days: days,
+      );
+      if (liveHistory.isNotEmpty) {
+        return liveHistory;
+      }
+    }
+
     try {
+      final today = DateTime.now();
+      final startDate = _dateOnly(today.subtract(Duration(days: days - 1)));
+      final endDate = _dateOnly(today);
       final uri = Uri.parse(
-        '$_openMeteoBaseUrl?latitude=$lat&longitude=$lng&hourly=us_aqi&past_days=29&forecast_days=1&timezone=auto',
+        '$_openMeteoBaseUrl?latitude=$lat&longitude=$lng&hourly=us_aqi&start_date=$startDate&end_date=$endDate&timezone=auto',
       );
       final resp = await http.get(uri).timeout(const Duration(seconds: 10));
-      if (resp.statusCode != 200) return const {'week': [], 'month': []};
+      if (resp.statusCode != 200) return const <AqiHourlyPoint>[];
 
       final json = jsonDecode(resp.body) as Map<String, dynamic>;
       final hourly = json['hourly'] as Map<String, dynamic>?;
-      if (hourly == null) return const {'week': [], 'month': []};
+      if (hourly == null) return const <AqiHourlyPoint>[];
 
       final times = hourly['time'] as List<dynamic>? ?? [];
       final aqiList = hourly['us_aqi'] as List<dynamic>? ?? [];
-      final groupedValues = <DateTime, List<int>>{};
+      final points = <AqiHourlyPoint>[];
 
       for (var i = 0; i < times.length; i++) {
         final timestamp = DateTime.tryParse(times[i].toString());
         final aqi = _toInt(aqiList, i);
         if (timestamp == null || aqi == null) continue;
-
-        final day = DateTime(timestamp.year, timestamp.month, timestamp.day);
-        groupedValues.putIfAbsent(day, () => <int>[]).add(aqi);
+        points.add(
+          AqiHourlyPoint(
+            time: timestamp,
+            aqi: aqi.clamp(0, 500).toInt(),
+          ),
+        );
       }
 
-      final all = groupedValues.entries.map((entry) {
-        final values = entry.value;
-        final max = values.reduce((a, b) => a > b ? a : b);
-        final avg =
-            (values.reduce((a, b) => a + b) / values.length).round();
-        return AqiTrendDay(date: entry.key, maxAqi: max, avgAqi: avg);
-      }).toList()
-        ..sort((a, b) => a.date.compareTo(b.date));
-
-      final month = all.length > 30 ? all.sublist(all.length - 30) : all;
-      final week = month.length > 7 ? month.sublist(month.length - 7) : month;
-      return {'week': week, 'month': month};
+      points.sort((a, b) => a.time.compareTo(b.time));
+      return points;
     } catch (_) {
-      return const {'week': [], 'month': []};
+      return const <AqiHourlyPoint>[];
     }
   }
 
@@ -127,31 +143,7 @@ class AqiApi {
 
   Future<AqiData?> _fetchCurrentAqiFromOpenAq(double lat, double lng) async {
     try {
-      final locationsUri = Uri.parse(
-        '$_openAqBaseUrl/locations?coordinates=$lat,$lng&radius=20000&limit=10',
-      );
-      final locResp = await http
-          .get(locationsUri, headers: _openAqHeaders)
-          .timeout(const Duration(seconds: 10));
-      if (locResp.statusCode != 200) return null;
-
-      final locJson = jsonDecode(locResp.body) as Map<String, dynamic>;
-      final locResults = locJson['results'] as List<dynamic>?;
-      if (locResults == null || locResults.isEmpty) return null;
-
-      final candidates = locResults
-          .whereType<Map<String, dynamic>>()
-          .map((location) => (
-                data: location,
-                distance: _distanceFromUser(
-                  userLat: lat,
-                  userLng: lng,
-                  location: location,
-                ),
-              ))
-          .where((candidate) => candidate.distance != null)
-          .toList()
-        ..sort((a, b) => a.distance!.compareTo(b.distance!));
+      final candidates = await _fetchNearbyOpenAqLocations(lat, lng);
 
       for (final candidate in candidates) {
         final loc = candidate.data;
@@ -196,7 +188,7 @@ class AqiApi {
         }
 
         return AqiData(
-          aqi: aqi.clamp(0, 500),
+          aqi: aqi.clamp(0, 500).toInt(),
           lat: lat,
           lng: lng,
           timestamp: DateTime.now(),
@@ -209,6 +201,182 @@ class AqiApi {
       return null;
     }
     return null;
+  }
+
+  Future<List<AqiHourlyPoint>> _fetchAqiHistoryFromOpenAq(
+    double lat,
+    double lng,
+    {
+    required int days,
+    }
+  ) async {
+    try {
+      final candidates = await _fetchNearbyOpenAqLocations(lat, lng);
+      final today = DateTime.now();
+      final from =
+          '${_dateOnly(today.subtract(Duration(days: days - 1)))}T00:00:00Z';
+      final to = '${_dateOnly(today)}T23:59:59Z';
+      List<AqiHourlyPoint> bestHistory = const <AqiHourlyPoint>[];
+
+      for (final candidate in candidates) {
+        final sensorsList = candidate.data['sensors'] as List<dynamic>? ?? [];
+        final sensorsByParameter = <String, int>{};
+
+        for (final sensorRaw in sensorsList.whereType<Map<String, dynamic>>()) {
+          final sensorId = sensorRaw['id'] as int?;
+          final parameter = sensorRaw['parameter'] as Map<String, dynamic>?;
+          final parameterName = parameter?['name'] as String?;
+          if (sensorId == null || parameterName == null) continue;
+          if (parameterName == 'pm25' || parameterName == 'pm10') {
+            sensorsByParameter.putIfAbsent(parameterName, () => sensorId);
+          }
+        }
+
+        final pm25Hours = sensorsByParameter.containsKey('pm25')
+            ? await _fetchOpenAqHourlySensorHistory(
+                sensorId: sensorsByParameter['pm25']!,
+                parameterName: 'pm25',
+                from: from,
+                to: to,
+              )
+            : const <DateTime, int>{};
+        final pm10Hours = sensorsByParameter.containsKey('pm10')
+            ? await _fetchOpenAqHourlySensorHistory(
+                sensorId: sensorsByParameter['pm10']!,
+                parameterName: 'pm10',
+                from: from,
+                to: to,
+              )
+            : const <DateTime, int>{};
+
+        final merged = <DateTime, int>{};
+        for (final entry in pm25Hours.entries) {
+          merged[entry.key] = entry.value;
+        }
+        for (final entry in pm10Hours.entries) {
+          final existing = merged[entry.key];
+          merged[entry.key] =
+              existing == null ? entry.value : (existing > entry.value ? existing : entry.value);
+        }
+
+        final history = merged.entries
+            .map(
+              (entry) => AqiHourlyPoint(
+                time: entry.key,
+                aqi: entry.value.clamp(0, 500).toInt(),
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.time.compareTo(b.time));
+
+        if (history.length > bestHistory.length) {
+          bestHistory = history;
+        }
+        if (history.length >= days * 12) {
+          return history;
+        }
+      }
+
+      return bestHistory;
+    } catch (_) {
+      return const <AqiHourlyPoint>[];
+    }
+  }
+
+  Future<List<({Map<String, dynamic> data, double? distance})>>
+      _fetchNearbyOpenAqLocations(
+    double lat,
+    double lng,
+  ) async {
+    final locationsUri = Uri.parse(
+      '$_openAqBaseUrl/locations?coordinates=$lat,$lng&radius=20000&limit=10',
+    );
+    final locResp = await http
+        .get(locationsUri, headers: _openAqHeaders)
+        .timeout(const Duration(seconds: 10));
+    if (locResp.statusCode != 200) return [];
+
+    final locJson = jsonDecode(locResp.body) as Map<String, dynamic>;
+    final locResults = locJson['results'] as List<dynamic>?;
+    if (locResults == null || locResults.isEmpty) return [];
+
+    final candidates = locResults
+        .whereType<Map<String, dynamic>>()
+        .map((location) => (
+              data: location,
+              distance: _distanceFromUser(
+                userLat: lat,
+                userLng: lng,
+                location: location,
+              ),
+            ))
+        .where((candidate) => candidate.distance != null)
+        .toList()
+      ..sort((a, b) => a.distance!.compareTo(b.distance!));
+
+    return candidates;
+  }
+
+  Future<Map<DateTime, int>> _fetchOpenAqHourlySensorHistory({
+    required int sensorId,
+    required String parameterName,
+    required String from,
+    required String to,
+  }) async {
+    final uri = Uri.parse('$_openAqBaseUrl/sensors/$sensorId/hours')
+        .replace(
+      queryParameters: {
+        'datetime_from': from,
+        'datetime_to': to,
+        'limit': '1000',
+      },
+    );
+    final resp = await http
+        .get(uri, headers: _openAqHeaders)
+        .timeout(const Duration(seconds: 10));
+    if (resp.statusCode != 200) return const <DateTime, int>{};
+
+    final json = jsonDecode(resp.body) as Map<String, dynamic>;
+    final results = json['results'] as List<dynamic>? ?? const [];
+    final output = <DateTime, int>{};
+
+    for (final rowRaw in results.whereType<Map<String, dynamic>>()) {
+      final time = _openAqPeriodDateTime(rowRaw);
+      if (time == null) continue;
+      final summary = rowRaw['summary'] as Map<String, dynamic>?;
+      final avgConcentration = _toDouble(summary?['avg'] ?? rowRaw['value']);
+      final avgAqi = _aqiFromParameter(parameterName, avgConcentration);
+      if (avgAqi == null) continue;
+
+      final existing = output[time];
+      output[time] = existing == null ? avgAqi : (existing > avgAqi ? existing : avgAqi);
+    }
+
+    return output;
+  }
+
+  Map<String, List<AqiTrendDay>> _buildTrendBuckets(List<AqiHourlyPoint> history) {
+    if (history.isEmpty) {
+      return const {'week': [], 'month': []};
+    }
+
+    final groupedValues = <DateTime, List<int>>{};
+    for (final point in history) {
+      final day = DateTime(point.time.year, point.time.month, point.time.day);
+      groupedValues.putIfAbsent(day, () => <int>[]).add(point.aqi);
+    }
+
+    final all = groupedValues.entries.map((entry) {
+      final values = entry.value;
+      final max = values.reduce((a, b) => a > b ? a : b);
+      final avg = (values.reduce((a, b) => a + b) / values.length).round();
+      return AqiTrendDay(date: entry.key, maxAqi: max, avgAqi: avg);
+    }).toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+
+    final month = all.length > 30 ? all.sublist(all.length - 30) : all;
+    final week = month.length > 7 ? month.sublist(month.length - 7) : month;
+    return {'week': week, 'month': month};
   }
 
   int? _pm25ToAqi(double? pm25) {
@@ -245,6 +413,17 @@ class AqiApi {
       }
     }
     return pm10 > 604 ? 500 : null;
+  }
+
+  int? _aqiFromParameter(String parameterName, double? value) {
+    switch (parameterName) {
+      case 'pm25':
+        return _pm25ToAqi(value);
+      case 'pm10':
+        return _pm10ToAqi(value);
+      default:
+        return null;
+    }
   }
 
   Future<String?> _resolveLocationName(double lat, double lng) async {
@@ -322,6 +501,18 @@ class AqiApi {
 
     if (parts.isEmpty) return null;
     return parts.join(', ');
+  }
+
+  String _dateOnly(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+  DateTime? _openAqPeriodDateTime(Map<String, dynamic> row) {
+    final period = row['period'] as Map<String, dynamic>?;
+    final from = period?['datetimeFrom'] as Map<String, dynamic>?;
+    final raw = from?['local'] as String? ?? from?['utc'] as String?;
+    final parsed = raw == null ? null : DateTime.tryParse(raw);
+    if (parsed == null) return null;
+    return DateTime(parsed.year, parsed.month, parsed.day, parsed.hour);
   }
 
   double? _distanceFromUser({

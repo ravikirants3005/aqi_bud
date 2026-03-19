@@ -1,11 +1,14 @@
-/// Home Dashboard - REQ 3.1, 4.1
-/// Big AQI circle, 7-day trend, exposure score card, suggestions link
+/// Home Dashboard - live AQI command center
 library;
 
+import 'dart:math' as math;
+
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../data/models/aqi_models.dart';
 import '../../../data/models/user_models.dart';
@@ -17,12 +20,15 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final aqiAsync = ref.watch(currentAqiProvider);
+    final historyAsync = ref.watch(aqiHourlyHistoryProvider);
     final trendsAsync = ref.watch(aqiTrendsProvider);
     final profile = ref.watch(userProfileProvider);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
+      backgroundColor: const Color(0xFF081217),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF12242B),
+        foregroundColor: Colors.white,
         title: const Text('AQI Buddy'),
         actions: [
           IconButton(
@@ -31,42 +37,83 @@ class HomeScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          ref.invalidate(locationProvider);
-          ref.invalidate(currentAqiProvider);
-          ref.invalidate(aqiTrendsProvider);
-        },
-        child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF081217), Color(0xFF0D1A21), Color(0xFF122A34)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: RefreshIndicator(
+          onRefresh: () async {
+            ref.invalidate(locationProvider);
+            ref.invalidate(currentAqiProvider);
+            ref.invalidate(aqiHourlyHistoryProvider);
+            ref.invalidate(aqiTrendsProvider);
+          },
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
             children: [
-              aqiAsync.when(
-                data: (data) {
-                  if (data == null) {
-                    return _locationDisabledCard(context, ref);
-                  }
-                  return _aqiCircle(context, ref, profile, data, isDark);
-                },
-                loading: () => const _AqiLoadingCard(),
-                error: (e, _) => _fallbackAqiCard(),
-              ),
-              const SizedBox(height: 24),
-              trendsAsync.when(
-                data: (trends) {
-                  final week = trends['week'] ?? [];
-                  return _sevenDayTrend(context, week, aqiAsync.valueOrNull);
-                },
-                loading: () => const SizedBox(
-                  height: 120,
-                  child: Center(child: CircularProgressIndicator()),
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1180),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      aqiAsync.when(
+                        data: (data) => data == null
+                            ? _LocationDisabledCard(ref: ref)
+                            : _HeroCard(
+                                data: data,
+                                profile: profile,
+                                onSave: () => _saveCurrentLocation(
+                                  context,
+                                  ref,
+                                  profile,
+                                  data,
+                                ),
+                              ),
+                        loading: () => const _LoadingPanel(height: 320),
+                        error: (error, _) => const _MessagePanel(
+                          title: 'Live AQI snapshot unavailable',
+                          message:
+                              'The dashboard will refresh as soon as the current AQI feed responds.',
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      historyAsync.when(
+                        data: (history) => _HourlyHistoryCard(
+                          currentData: aqiAsync.valueOrNull,
+                          history: history,
+                        ),
+                        loading: () => const _LoadingPanel(height: 300),
+                        error: (error, _) => const _MessagePanel(
+                          title: '24-Hour AQI Wave',
+                          message:
+                              'Live hourly history could not be loaded right now.',
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      trendsAsync.when(
+                        data: (trends) => _SevenDayCard(
+                          currentData: aqiAsync.valueOrNull,
+                          week: trends['week'] ?? const <AqiTrendDay>[],
+                        ),
+                        loading: () => const _LoadingPanel(height: 250),
+                        error: (error, _) => const _MessagePanel(
+                          title: '7-Day AQI Pattern',
+                          message:
+                              'Weekly AQI history is temporarily unavailable.',
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      const _ActionDeck(),
+                    ],
+                  ),
                 ),
-                error: (err, stackTrace) => const SizedBox.shrink(),
               ),
-              const SizedBox(height: 16),
-              _quickCards(context),
             ],
           ),
         ),
@@ -75,418 +122,37 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _aqiCircle(
-    BuildContext context,
-    WidgetRef ref,
-    UserProfile? profile,
-    AqiData data,
-    bool isDark,
-  ) {
-    final color = Color(data.category.colorValue);
-    final savedLocations = profile?.savedLocations ?? const <SavedLocation>[];
-    final alreadySaved = savedLocations.any(
-      (location) =>
-          (location.lat - data.lat).abs() < 0.001 &&
-          (location.lng - data.lng).abs() < 0.001,
-    );
-
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            color.withValues(alpha: isDark ? 0.28 : 0.16),
-            Theme.of(context).colorScheme.surfaceContainerHighest,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Card(
-        color: Colors.transparent,
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  _InfoPill(
-                    icon: Icons.wifi_tethering,
-                    label: 'Live AQI',
-                    color: color,
-                  ),
-                  const SizedBox(width: 10),
-                  _InfoPill(
-                    icon: Icons.place_outlined,
-                    label: _locationLabel(data),
-                    color: Theme.of(context).colorScheme.primary,
-                    expand: true,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Current air quality',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            fontSize: 14,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          data.category.label,
-                          style: TextStyle(
-                            color: color,
-                            fontSize: 28,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            _StatTag(
-                              label: 'PM2.5',
-                              value: data.pm25?.toStringAsFixed(1) ?? '--',
-                            ),
-                            _StatTag(
-                              label: 'PM10',
-                              value: data.pm10?.toStringAsFixed(1) ?? '--',
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      SizedBox(
-                        width: 168,
-                        height: 168,
-                        child: CircularProgressIndicator(
-                          value: (data.aqi / 500).clamp(0.0, 1.0),
-                          strokeWidth: 14,
-                          backgroundColor: color.withValues(alpha: 0.18),
-                          valueColor: AlwaysStoppedAnimation<Color>(color),
-                        ),
-                      ),
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '${data.aqi}',
-                            style: const TextStyle(
-                              fontSize: 46,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          Text(
-                            'US AQI',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              fontSize: 12,
-                              letterSpacing: 1,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 22),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    backgroundColor:
-                        alreadySaved ? color.withValues(alpha: 0.7) : color,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: alreadySaved
-                      ? null
-                      : () => _saveCurrentLocation(context, ref, profile, data),
-                  icon: Icon(
-                    alreadySaved ? Icons.check_circle_outline : Icons.favorite_border,
-                  ),
-                  label: Text(
-                    alreadySaved
-                        ? 'Saved in favorites'
-                        : 'Save current location',
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _sevenDayTrend(
-    BuildContext context,
-    List<AqiTrendDay> week,
-    AqiData? currentData,
-  ) {
-    final trackedLocation = currentData == null ? null : _locationLabel(currentData);
-
-    if (week.length < 2) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '7-Day AQI Trend',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              if (trackedLocation != null) ...[
-                Text(
-                  'Tracking: $trackedLocation',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
-              Text(
-                'Trend history for this live location is still loading.',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    final worst = week.reduce((a, b) => a.maxAqi > b.maxAqi ? a : b);
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  '7-Day AQI Trend',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    if (trackedLocation != null)
-                      Text(
-                        trackedLocation,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.primary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    Text(
-                      'Worst: ${worst.maxAqi}',
-                      style: TextStyle(
-                        color: Color(aqiToCategory(worst.maxAqi).colorValue),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 80,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: week.map((day) {
-                  final maxVal =
-                      week.map((item) => item.maxAqi).reduce((a, b) => a > b ? a : b);
-                  final height = maxVal > 0 ? (day.maxAqi / maxVal) * 60.0 : 20.0;
-                  final cat = aqiToCategory(day.maxAqi);
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 24,
-                        height: height.clamp(8.0, 60.0),
-                        decoration: BoxDecoration(
-                          color: Color(cat.colorValue),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${day.date.day}',
-                        style: const TextStyle(fontSize: 10),
-                      ),
-                    ],
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _quickCards(BuildContext context) {
-    return Column(
-      children: [
-        _QuickCard(
-          title: 'Suggestions',
-          subtitle: 'Pre, during & post outdoor tips',
-          icon: Icons.lightbulb_outline,
-          onTap: () => context.push('/suggestions'),
-        ),
-        const SizedBox(height: 12),
-        _QuickCard(
-          title: 'Exposure Insights',
-          subtitle: 'Track your pollution exposure',
-          icon: Icons.analytics_outlined,
-          onTap: () => context.push('/insights'),
-        ),
-      ],
-    );
-  }
-
-  Widget _locationDisabledCard(BuildContext context, WidgetRef ref) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            Icon(
-              Icons.location_off,
-              size: 48,
-              color: Theme.of(context).colorScheme.error,
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Location access needed',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Allow device location so the app can fetch AQI for your current area.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: () => _requestLocationAccess(context, ref),
-              icon: const Icon(Icons.my_location),
-              label: const Text('Allow location access'),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'On Windows, location permission can also be controlled from system Privacy & security settings.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _fallbackAqiCard() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            const Text(
-              '50',
-              style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              'Good',
-              style: TextStyle(color: Colors.green[700], fontSize: 16),
-            ),
-            const Text('Using cached data', style: TextStyle(fontSize: 12)),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _bottomNav(BuildContext context) {
-    return NavigationBar(
-      destinations: const [
-        NavigationDestination(icon: Icon(Icons.home), label: 'Home'),
-        NavigationDestination(icon: Icon(Icons.favorite), label: 'Health'),
-        NavigationDestination(icon: Icon(Icons.school), label: 'Learn'),
-      ],
-      selectedIndex: 0,
-      onDestinationSelected: (i) {
-        if (i == 1) context.push('/health-tips');
-        if (i == 2) context.push('/education');
-      },
+    return NavigationBarTheme(
+      data: NavigationBarThemeData(
+        backgroundColor: const Color(0xFF142228),
+        indicatorColor: const Color(0xFF29434B),
+        labelTextStyle: MaterialStatePropertyAll(
+          TextStyle(
+            color: Theme.of(context).colorScheme.onSurface,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      child: NavigationBar(
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home_rounded), label: 'Home'),
+          NavigationDestination(
+            icon: Icon(Icons.favorite_rounded),
+            label: 'Health',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.school_rounded),
+            label: 'Learn',
+          ),
+        ],
+        selectedIndex: 0,
+        onDestinationSelected: (index) {
+          if (index == 1) context.push('/health-tips');
+          if (index == 2) context.push('/education');
+        },
+      ),
     );
-  }
-
-  Future<void> _requestLocationAccess(BuildContext context, WidgetRef ref) async {
-    final enabled = await Geolocator.isLocationServiceEnabled();
-    if (!enabled) {
-      await Geolocator.openLocationSettings();
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Turn on device location services in Windows settings and try again.'),
-          ),
-        );
-      }
-      return;
-    }
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      await Geolocator.openAppSettings();
-      return;
-    }
-
-    if (permission == LocationPermission.denied) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Location permission denied. AQI cannot be loaded.'),
-          ),
-        );
-      }
-      return;
-    }
-
-    ref.invalidate(locationProvider);
-    ref.invalidate(currentAqiProvider);
-    ref.invalidate(aqiTrendsProvider);
   }
 
   Future<void> _saveCurrentLocation(
@@ -500,9 +166,7 @@ class HomeScreen extends ConsumerWidget {
     final locationName = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
-        final controller = TextEditingController(
-          text: _locationLabel(data),
-        );
+        final controller = TextEditingController(text: _locationLabel(data));
         return AlertDialog(
           title: const Text('Save favorite location'),
           content: TextField(
@@ -561,27 +225,702 @@ class HomeScreen extends ConsumerWidget {
       SnackBar(content: Text('$locationName added to favorite locations.')),
     );
   }
-
-  String _locationLabel(AqiData data) {
-    final label = data.locationName?.trim();
-    if (label != null && label.isNotEmpty) {
-      return label;
-    }
-    return '${data.lat.toStringAsFixed(3)}, ${data.lng.toStringAsFixed(3)}';
-  }
 }
 
-class _AqiLoadingCard extends StatelessWidget {
-  const _AqiLoadingCard();
+class _HeroCard extends StatelessWidget {
+  const _HeroCard({
+    required this.data,
+    required this.profile,
+    required this.onSave,
+  });
+
+  final AqiData data;
+  final UserProfile? profile;
+  final VoidCallback onSave;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    final accent = Color(data.category.colorValue);
+    final savedLocations = profile?.savedLocations ?? const <SavedLocation>[];
+    final alreadySaved = savedLocations.any(
+      (location) =>
+          (location.lat - data.lat).abs() < 0.001 &&
+          (location.lng - data.lng).abs() < 0.001,
+    );
+
+    return _Panel(
+      gradient: LinearGradient(
+        colors: [
+          const Color(0xFF121B20),
+          accent.withValues(alpha: 0.22),
+          const Color(0xFF16323B),
+        ],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 760;
+            final info = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    _Pill(icon: Icons.radar_rounded, label: 'Live AQI', color: accent),
+                    _Pill(
+                      icon: Icons.place_outlined,
+                      label: _locationLabel(data),
+                      color: const Color(0xFF1FC7E3),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Current air quality',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.72),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  data.category.label,
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: compact ? 30 : 36,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _headline(data.aqi),
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.84),
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    _MetricTile(label: 'PM2.5', value: data.pm25?.toStringAsFixed(1) ?? '--'),
+                    _MetricTile(label: 'PM10', value: data.pm10?.toStringAsFixed(1) ?? '--'),
+                    _MetricTile(
+                      label: 'Updated',
+                      value: DateFormat('hh:mm a').format(data.timestamp),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+                FilledButton.icon(
+                  onPressed: alreadySaved ? null : onSave,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  ),
+                  icon: Icon(
+                    alreadySaved ? Icons.check_circle_outline : Icons.favorite_border,
+                  ),
+                  label: Text(
+                    alreadySaved ? 'Saved in favorites' : 'Save current location',
+                  ),
+                ),
+              ],
+            );
+
+            final gauge = SizedBox(
+              width: 220,
+              height: 220,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 180,
+                    height: 180,
+                    child: CircularProgressIndicator(
+                      value: (data.aqi / 500).clamp(0.0, 1.0),
+                      strokeWidth: 16,
+                      backgroundColor: accent.withValues(alpha: 0.12),
+                      valueColor: AlwaysStoppedAnimation<Color>(accent),
+                    ),
+                  ),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${data.aqi}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 56,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      Text(
+                        'US AQI',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.72),
+                          letterSpacing: 1.1,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  info,
+                  const SizedBox(height: 24),
+                  Center(child: gauge),
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                Expanded(child: info),
+                const SizedBox(width: 24),
+                gauge,
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _HourlyHistoryCard extends StatelessWidget {
+  const _HourlyHistoryCard({
+    required this.currentData,
+    required this.history,
+  });
+
+  final AqiData? currentData;
+  final List<AqiHourlyPoint> history;
+
+  @override
+  Widget build(BuildContext context) {
+    final last24 = _recent24Hours(history);
+    if (last24.length < 3) {
+      return _MessagePanel(
+        title: '24-Hour AQI Wave',
+        message: currentData == null
+            ? 'Live hourly history is not available until the current location is loaded.'
+            : 'Hourly history for ${_locationLabel(currentData!)} is still loading.',
+      );
+    }
+
+    final minAqi = last24.map((point) => point.aqi).reduce(math.min);
+    final maxAqi = last24.map((point) => point.aqi).reduce(math.max);
+    final avgAqi =
+        (last24.map((point) => point.aqi).reduce((a, b) => a + b) / last24.length)
+            .round();
+    final maxY = math.max(100, (((maxAqi + 24) ~/ 25) * 25)).toDouble();
+    final interval = maxY <= 100 ? 20.0 : (maxY / 5).ceilToDouble();
+
+    return _Panel(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '24-Hour AQI Wave',
+              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              currentData == null
+                  ? 'Live hourly AQI history'
+                  : 'Tracking ${_locationLabel(currentData!)} with live hourly sensor history',
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+            ),
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _StatChip(label: 'Now', value: '${last24.last.aqi}', accent: Color(aqiToCategory(last24.last.aqi).colorValue)),
+                _StatChip(label: '24h Avg', value: '$avgAqi', accent: const Color(0xFF20C5D8)),
+                _StatChip(label: '24h Max', value: '$maxAqi', accent: Color(aqiToCategory(maxAqi).colorValue)),
+                _StatChip(label: '24h Min', value: '$minAqi', accent: Color(aqiToCategory(minAqi).colorValue)),
+              ],
+            ),
+            const SizedBox(height: 22),
+            SizedBox(
+              height: 240,
+              child: LineChart(
+                LineChartData(
+                  minY: 0,
+                  maxY: maxY,
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: interval,
+                    getDrawingHorizontalLine: (value) => FlLine(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      strokeWidth: 1,
+                    ),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 34,
+                        interval: interval,
+                        getTitlesWidget: (value, meta) => Text(
+                          value.toInt().toString(),
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.58), fontSize: 10),
+                        ),
+                      ),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        interval: _xInterval(last24.length),
+                        getTitlesWidget: (value, meta) {
+                          final index = value.toInt();
+                          if (index < 0 || index >= last24.length) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              DateFormat('ha').format(last24[index].time),
+                              style: TextStyle(color: Colors.white.withValues(alpha: 0.58), fontSize: 10),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  lineTouchData: LineTouchData(
+                    touchTooltipData: LineTouchTooltipData(
+                      getTooltipColor: (_) => const Color(0xFF13242A),
+                      getTooltipItems: (spots) => spots.map((spot) {
+                        final point = last24[spot.x.toInt()];
+                        return LineTooltipItem(
+                          '${DateFormat('dd MMM, hh:mm a').format(point.time)}\nAQI ${point.aqi}',
+                          const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: [
+                        for (var i = 0; i < last24.length; i++)
+                          FlSpot(i.toDouble(), last24[i].aqi.toDouble()),
+                      ],
+                      isCurved: true,
+                      curveSmoothness: 0.28,
+                      color: const Color(0xFF20C5D8),
+                      barWidth: 3.5,
+                      belowBarData: BarAreaData(
+                        show: true,
+                        color: const Color(0xFF20C5D8).withValues(alpha: 0.12),
+                      ),
+                      dotData: FlDotData(
+                        show: true,
+                        getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
+                          radius: 3,
+                          color: Color(aqiToCategory(last24[index].aqi).colorValue),
+                          strokeWidth: 1.2,
+                          strokeColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SevenDayCard extends StatelessWidget {
+  const _SevenDayCard({
+    required this.currentData,
+    required this.week,
+  });
+
+  final AqiData? currentData;
+  final List<AqiTrendDay> week;
+
+  @override
+  Widget build(BuildContext context) {
+    if (week.length < 2) {
+      return _MessagePanel(
+        title: '7-Day AQI Pattern',
+        message: currentData == null
+            ? 'Weekly AQI history will appear after the live location loads.'
+            : 'Weekly AQI history for ${_locationLabel(currentData!)} is still loading.',
+      );
+    }
+
+    final worst = week.reduce((a, b) => a.maxAqi >= b.maxAqi ? a : b);
+    final best = week.reduce((a, b) => a.maxAqi <= b.maxAqi ? a : b);
+    final average =
+        (week.map((day) => day.avgAqi).reduce((a, b) => a + b) / week.length)
+            .round();
+    final maxY =
+        math.max(100, (((week.map((day) => day.maxAqi).reduce(math.max) + 24) ~/ 25) * 25))
+            .toDouble();
+
+    return _Panel(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '7-Day AQI Pattern',
+              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              currentData == null
+                  ? 'Daily AQI maxima for the last 7 days'
+                  : 'Daily AQI maxima for ${_locationLabel(currentData!)}',
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+            ),
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _StatChip(label: 'Best day', value: '${DateFormat('EEE').format(best.date)} ${best.maxAqi}', accent: Color(aqiToCategory(best.maxAqi).colorValue)),
+                _StatChip(label: 'Worst day', value: '${DateFormat('EEE').format(worst.date)} ${worst.maxAqi}', accent: Color(aqiToCategory(worst.maxAqi).colorValue)),
+                _StatChip(label: '7d Avg', value: '$average', accent: const Color(0xFF20C5D8)),
+              ],
+            ),
+            const SizedBox(height: 22),
+            SizedBox(
+              height: 240,
+              child: BarChart(
+                BarChartData(
+                  maxY: maxY,
+                  alignment: BarChartAlignment.spaceAround,
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: maxY <= 100 ? 20 : maxY / 5,
+                    getDrawingHorizontalLine: (value) => FlLine(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      strokeWidth: 1,
+                    ),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  barTouchData: BarTouchData(
+                    touchTooltipData: BarTouchTooltipData(
+                      getTooltipColor: (_) => const Color(0xFF13242A),
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        final day = week[group.x.toInt()];
+                        return BarTooltipItem(
+                          '${DateFormat('EEE, dd MMM').format(day.date)}\nMax ${day.maxAqi} | Avg ${day.avgAqi}',
+                          const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                        );
+                      },
+                    ),
+                  ),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 34,
+                        interval: maxY <= 100 ? 20 : maxY / 5,
+                        getTitlesWidget: (value, meta) => Text(
+                          value.toInt().toString(),
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.58), fontSize: 10),
+                        ),
+                      ),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        getTitlesWidget: (value, meta) {
+                          final index = value.toInt();
+                          if (index < 0 || index >= week.length) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              DateFormat('E').format(week[index].date),
+                              style: TextStyle(color: Colors.white.withValues(alpha: 0.62), fontSize: 11),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  barGroups: [
+                    for (var i = 0; i < week.length; i++)
+                      BarChartGroupData(
+                        x: i,
+                        barRods: [
+                          BarChartRodData(
+                            toY: week[i].maxAqi.toDouble(),
+                            width: 26,
+                            borderRadius: BorderRadius.circular(10),
+                            color: Color(aqiToCategory(week[i].maxAqi).colorValue),
+                            backDrawRodData: BackgroundBarChartRodData(
+                              show: true,
+                              toY: maxY,
+                              color: Colors.white.withValues(alpha: 0.04),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionDeck extends StatelessWidget {
+  const _ActionDeck();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stacked = constraints.maxWidth < 800;
+        final suggestions = _ActionCard(
+          title: 'Suggestions',
+          subtitle: 'Practical pre, during and post outdoor guidance.',
+          icon: Icons.tips_and_updates_outlined,
+          accent: const Color(0xFF21C9B5),
+          onTap: () => context.push('/suggestions'),
+        );
+        final insights = _ActionCard(
+          title: 'Exposure Insights',
+          subtitle: 'Break down weekly and monthly AQI history in detail.',
+          icon: Icons.insights_outlined,
+          accent: const Color(0xFF20C5D8),
+          onTap: () => context.push('/insights'),
+        );
+
+        if (stacked) {
+          return Column(
+            children: [
+              suggestions,
+              const SizedBox(height: 14),
+              insights,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: suggestions),
+            const SizedBox(width: 14),
+            Expanded(child: insights),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _LocationDisabledCard extends StatelessWidget {
+  const _LocationDisabledCard({required this.ref});
+
+  final WidgetRef ref;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Panel(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Icon(
+              Icons.location_off_outlined,
+              size: 52,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Location access needed',
+              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Allow device location so AQI Buddy can fetch live AQI and real trend history for wherever you are.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.72)),
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: () => _requestLocationAccess(context, ref),
+              icon: const Icon(Icons.my_location),
+              label: const Text('Allow location access'),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'On Windows, the system may ask through Privacy & security > Location settings.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Panel extends StatelessWidget {
+  const _Panel({required this.child, this.gradient});
+
+  final Widget child;
+  final Gradient? gradient;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        color: gradient == null ? const Color(0xFF111A1F).withValues(alpha: 0.92) : null,
+        gradient: gradient,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _LoadingPanel extends StatelessWidget {
+  const _LoadingPanel({required this.height});
+
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Panel(
       child: SizedBox(
-        height: 220,
-        child: Center(
-          child: CircularProgressIndicator(
-            color: Theme.of(context).colorScheme.primary,
+        height: height,
+        child: const Center(child: CircularProgressIndicator()),
+      ),
+    );
+  }
+}
+
+class _MessagePanel extends StatelessWidget {
+  const _MessagePanel({
+    required this.title,
+    required this.message,
+  });
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Panel(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              message,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionCard extends StatelessWidget {
+  const _ActionCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(24),
+      child: Ink(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          gradient: LinearGradient(
+            colors: [const Color(0xFF111A1F), accent.withValues(alpha: 0.14)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(icon, color: accent),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.68)),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.arrow_forward_rounded, color: accent),
+            ],
           ),
         ),
       ),
@@ -589,80 +928,47 @@ class _AqiLoadingCard extends StatelessWidget {
   }
 }
 
-class _QuickCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _QuickCard({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Icon(icon),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: onTap,
-      ),
-    );
-  }
-}
-
-class _InfoPill extends StatelessWidget {
-  const _InfoPill({
+class _Pill extends StatelessWidget {
+  const _Pill({
     required this.icon,
     required this.label,
     required this.color,
-    this.expand = false,
   });
 
   final IconData icon;
   final String label;
   final Color color;
-  final bool expand;
 
   @override
   Widget build(BuildContext context) {
-    final text = Text(
-      label,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(
-        color: color,
-        fontWeight: FontWeight.w700,
-        fontSize: 12,
-      ),
-    );
-
-    final child = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.14)),
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Row(
-        mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
-          if (expand) Expanded(child: text) else Flexible(child: text),
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 260),
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: color, fontWeight: FontWeight.w700),
+            ),
+          ),
         ],
       ),
     );
-    return expand ? Expanded(child: child) : child;
   }
 }
 
-class _StatTag extends StatelessWidget {
-  const _StatTag({
+class _MetricTile extends StatelessWidget {
+  const _MetricTile({
     required this.label,
     required this.value,
   });
@@ -673,31 +979,135 @@ class _StatTag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      width: 112,
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(18),
+        color: Colors.black.withValues(alpha: 0.24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-              fontSize: 11,
-            ),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.64), fontSize: 12),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 6),
           Text(
             value,
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 15,
-            ),
+            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
           ),
         ],
       ),
     );
   }
+}
+
+class _StatChip extends StatelessWidget {
+  const _StatChip({
+    required this.label,
+    required this.value,
+    required this.accent,
+  });
+
+  final String label;
+  final String value;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent.withValues(alpha: 0.26)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.62), fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(color: accent, fontWeight: FontWeight.w800, fontSize: 18),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+List<AqiHourlyPoint> _recent24Hours(List<AqiHourlyPoint> history) {
+  if (history.isEmpty) return const <AqiHourlyPoint>[];
+  final cutoff = DateTime.now().subtract(const Duration(hours: 24));
+  final recent = history.where((point) => point.time.isAfter(cutoff)).toList();
+  if (recent.length >= 3) return recent;
+  return history.length > 24 ? history.sublist(history.length - 24) : history;
+}
+
+double _xInterval(int pointCount) {
+  if (pointCount <= 6) return 1;
+  if (pointCount <= 12) return 2;
+  if (pointCount <= 18) return 3;
+  return 4;
+}
+
+String _headline(int aqi) {
+  if (aqi <= 50) return 'Air looks clear right now. Outdoor plans are in a safe zone.';
+  if (aqi <= 100) return 'Conditions are manageable, but sensitive groups should stay alert.';
+  if (aqi <= 150) return 'Sensitive groups may feel the impact. Keep long outdoor time short.';
+  if (aqi <= 200) return 'Air is unhealthy. Reduce strenuous outdoor activity.';
+  if (aqi <= 300) return 'Air quality is very unhealthy. Protective steps are strongly advised.';
+  return 'Hazardous air conditions. Staying indoors is the safer choice.';
+}
+
+String _locationLabel(AqiData data) {
+  final label = data.locationName?.trim();
+  if (label != null && label.isNotEmpty) return label;
+  return '${data.lat.toStringAsFixed(3)}, ${data.lng.toStringAsFixed(3)}';
+}
+
+Future<void> _requestLocationAccess(BuildContext context, WidgetRef ref) async {
+  final enabled = await Geolocator.isLocationServiceEnabled();
+  if (!enabled) {
+    await Geolocator.openLocationSettings();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Turn on device location services in Windows settings and try again.'),
+        ),
+      );
+    }
+    return;
+  }
+
+  var permission = await Geolocator.checkPermission();
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+  }
+
+  if (permission == LocationPermission.deniedForever) {
+    await Geolocator.openAppSettings();
+    return;
+  }
+
+  if (permission == LocationPermission.denied) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location permission denied. AQI cannot be loaded.')),
+      );
+    }
+    return;
+  }
+
+  ref.invalidate(locationProvider);
+  ref.invalidate(currentAqiProvider);
+  ref.invalidate(aqiHourlyHistoryProvider);
+  ref.invalidate(aqiTrendsProvider);
 }

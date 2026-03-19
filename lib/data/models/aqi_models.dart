@@ -100,3 +100,18 @@ class AqiTrendDay extends Equatable {
   @override
   List<Object?> get props => [date, maxAqi, avgAqi];
 }
+
+class AqiHourlyPoint extends Equatable {
+  final DateTime time;
+  final int aqi;
+
+  const AqiHourlyPoint({
+    required this.time,
+    required this.aqi,
+  });
+
+  AqiCategory get category => aqiToCategory(aqi);
+
+  @override
+  List<Object?> get props => [time, aqi];
+}

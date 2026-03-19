@@ -20,7 +20,7 @@ class AuthLoader extends ConsumerStatefulWidget {
 }
 
 class _AuthLoaderState extends ConsumerState<AuthLoader> {
-  StreamSubscription<Position>? _locationSubscription;
+  Timer? _locationPollTimer;
   String? _lastPositionKey;
   bool _locationPromptOpen = false;
 
@@ -35,7 +35,7 @@ class _AuthLoaderState extends ConsumerState<AuthLoader> {
 
   @override
   void dispose() {
-    unawaited(_locationSubscription?.cancel());
+    _locationPollTimer?.cancel();
     super.dispose();
   }
 
@@ -138,32 +138,51 @@ class _AuthLoaderState extends ConsumerState<AuthLoader> {
   }
 
   Future<void> _startLocationTracking() async {
-    await _locationSubscription?.cancel();
+    final granted = await ensureLocationPermission();
+    if (!mounted || !granted) return;
+    _locationPollTimer?.cancel();
+    await _pollLocationAndRefresh(forceRefresh: true);
+    _locationPollTimer = Timer.periodic(
+      const Duration(minutes: 3),
+      (_) => unawaited(_pollLocationAndRefresh()),
+    );
+  }
 
+  Future<void> _pollLocationAndRefresh({
+    bool forceRefresh = false,
+  }) async {
     final granted = await ensureLocationPermission();
     if (!mounted || !granted) return;
 
-    _locationSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 25,
-      ),
-    ).listen(
-      (position) {
-        if (!mounted) return;
-        final nextKey =
-            '${position.latitude.toStringAsFixed(4)},${position.longitude.toStringAsFixed(4)}';
-        if (nextKey == _lastPositionKey) return;
-        _lastPositionKey = nextKey;
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
+      );
+      if (!mounted) return;
+
+      final nextKey =
+          '${position.latitude.toStringAsFixed(4)},${position.longitude.toStringAsFixed(4)}';
+      if (!forceRefresh && nextKey == _lastPositionKey) {
         _refreshLocationDrivenData();
-      },
-      onError: (_) {},
-    );
+        return;
+      }
+
+      _lastPositionKey = nextKey;
+      _refreshLocationDrivenData();
+    } catch (_) {
+      if (forceRefresh) {
+        _refreshLocationDrivenData();
+      }
+    }
   }
 
   void _refreshLocationDrivenData() {
     ref.invalidate(locationProvider);
     ref.invalidate(currentAqiProvider);
+    ref.invalidate(aqiHourlyHistoryProvider);
     ref.invalidate(aqiTrendsProvider);
     ref.invalidate(exposureDashboardProvider);
   }
