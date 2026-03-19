@@ -57,7 +57,7 @@ class HomeScreen extends ConsumerWidget {
               trendsAsync.when(
                 data: (trends) {
                   final week = trends['week'] ?? [];
-                  return _sevenDayTrend(week);
+                  return _sevenDayTrend(context, week);
                 },
                 loading: () => const SizedBox(
                   height: 120,
@@ -121,7 +121,7 @@ class HomeScreen extends ConsumerWidget {
                   const SizedBox(width: 10),
                   _InfoPill(
                     icon: Icons.place_outlined,
-                    label: data.locationName ?? 'Current location',
+                    label: _locationLabel(data),
                     color: Theme.of(context).colorScheme.primary,
                     expand: true,
                   ),
@@ -235,8 +235,30 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _sevenDayTrend(List<AqiTrendDay> week) {
-    if (week.isEmpty) return const SizedBox.shrink();
+  Widget _sevenDayTrend(BuildContext context, List<AqiTrendDay> week) {
+    if (week.length < 2) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '7-Day AQI Trend',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Trend data is still loading. Pull to refresh after location access is available.',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     final worst = week.reduce((a, b) => a.maxAqi > b.maxAqi ? a : b);
 
     return Card(
@@ -346,6 +368,15 @@ class HomeScreen extends ConsumerWidget {
               icon: const Icon(Icons.my_location),
               label: const Text('Allow location access'),
             ),
+            const SizedBox(height: 10),
+            Text(
+              'On Windows, location permission can also be controlled from system Privacy & security settings.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 12,
+              ),
+            ),
           ],
         ),
       ),
@@ -391,10 +422,11 @@ class HomeScreen extends ConsumerWidget {
   Future<void> _requestLocationAccess(BuildContext context, WidgetRef ref) async {
     final enabled = await Geolocator.isLocationServiceEnabled();
     if (!enabled) {
+      await Geolocator.openLocationSettings();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Turn on device location services and try again.'),
+            content: Text('Turn on device location services in Windows settings and try again.'),
           ),
         );
       }
@@ -439,7 +471,7 @@ class HomeScreen extends ConsumerWidget {
       context: context,
       builder: (dialogContext) {
         final controller = TextEditingController(
-          text: data.locationName ?? 'Current location',
+          text: _locationLabel(data),
         );
         return AlertDialog(
           title: const Text('Save favorite location'),
@@ -498,6 +530,14 @@ class HomeScreen extends ConsumerWidget {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$locationName added to favorite locations.')),
     );
+  }
+
+  String _locationLabel(AqiData data) {
+    final label = data.locationName?.trim();
+    if (label != null && label.isNotEmpty) {
+      return label;
+    }
+    return '${data.lat.toStringAsFixed(3)}, ${data.lng.toStringAsFixed(3)}';
   }
 }
 

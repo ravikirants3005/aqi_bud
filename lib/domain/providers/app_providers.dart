@@ -60,7 +60,7 @@ Future<bool> ensureLocationPermission({
 }
 
 final locationProvider = FutureProvider<Position?>((_) async {
-  final hasPermission = await ensureLocationPermission();
+  final hasPermission = await ensureLocationPermission(requestIfNeeded: true);
   if (!hasPermission) return null;
 
   Position? lastKnown;

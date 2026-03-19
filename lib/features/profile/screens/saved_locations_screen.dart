@@ -267,7 +267,7 @@ class _FavoriteLocationCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final aqiRepo = ref.watch(aqiRepoProvider);
 
-    return FutureBuilder<AqiData>(
+    return FutureBuilder<AqiData?>(
       future: aqiRepo.getCurrentAqi(location.lat, location.lng),
       builder: (context, snapshot) {
         final data = snapshot.data;

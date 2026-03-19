@@ -17,10 +17,17 @@ class AqiApi {
   static const _openMeteoBaseUrl =
       'https://air-quality.api.open-meteo.com/v1/air-quality';
   static const _openAqBaseUrl = 'https://api.openaq.org/v3';
+  static const _nominatimBaseUrl =
+      'https://nominatim.openstreetmap.org/reverse';
   final RuntimeConfig _config;
 
   Map<String, String> get _openAqHeaders => {
         if (_config.aqiApiKey.isNotEmpty) 'X-API-Key': _config.aqiApiKey,
+      };
+  Map<String, String> get _reverseGeocodeHeaders => const {
+        'User-Agent': 'AQIBuddy/1.0 (device-location reverse geocoding)',
+        'Accept': 'application/json',
+        'Accept-Language': 'en',
       };
 
   Future<AqiData?> fetchCurrentAqi(double lat, double lng) async {
@@ -65,30 +72,40 @@ class AqiApi {
   ) async {
     try {
       final uri = Uri.parse(
-        '$_openMeteoBaseUrl?latitude=$lat&longitude=$lng&daily=us_aqi_max,us_aqi_mean&past_days=30',
+        '$_openMeteoBaseUrl?latitude=$lat&longitude=$lng&hourly=us_aqi&past_days=29&forecast_days=1&timezone=auto',
       );
       final resp = await http.get(uri).timeout(const Duration(seconds: 10));
       if (resp.statusCode != 200) return const {'week': [], 'month': []};
 
       final json = jsonDecode(resp.body) as Map<String, dynamic>;
-      final daily = json['daily'] as Map<String, dynamic>?;
-      if (daily == null) return const {'week': [], 'month': []};
+      final hourly = json['hourly'] as Map<String, dynamic>?;
+      if (hourly == null) return const {'week': [], 'month': []};
 
-      final times = daily['time'] as List<dynamic>? ?? [];
-      final maxList = daily['us_aqi_max'] as List<dynamic>? ?? [];
-      final meanList = daily['us_aqi_mean'] as List<dynamic>? ?? [];
+      final times = hourly['time'] as List<dynamic>? ?? [];
+      final aqiList = hourly['us_aqi'] as List<dynamic>? ?? [];
+      final groupedValues = <DateTime, List<int>>{};
 
-      final all = <AqiTrendDay>[];
       for (var i = 0; i < times.length; i++) {
-        final d = DateTime.tryParse(times[i].toString());
-        if (d == null) continue;
-        final max = _toInt(maxList, i) ?? 50;
-        final avg = _toInt(meanList, i) ?? 50;
-        all.add(AqiTrendDay(date: d, maxAqi: max, avgAqi: avg));
+        final timestamp = DateTime.tryParse(times[i].toString());
+        final aqi = _toInt(aqiList, i);
+        if (timestamp == null || aqi == null) continue;
+
+        final day = DateTime(timestamp.year, timestamp.month, timestamp.day);
+        groupedValues.putIfAbsent(day, () => <int>[]).add(aqi);
       }
 
-      final week = all.length >= 7 ? all.sublist(all.length - 7) : all;
-      return {'week': week, 'month': all};
+      final all = groupedValues.entries.map((entry) {
+        final values = entry.value;
+        final max = values.reduce((a, b) => a > b ? a : b);
+        final avg =
+            (values.reduce((a, b) => a + b) / values.length).round();
+        return AqiTrendDay(date: entry.key, maxAqi: max, avgAqi: avg);
+      }).toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+
+      final month = all.length > 30 ? all.sublist(all.length - 30) : all;
+      final week = month.length > 7 ? month.sublist(month.length - 7) : month;
+      return {'week': week, 'month': month};
     } catch (_) {
       return const {'week': [], 'month': []};
     }
@@ -235,19 +252,76 @@ class AqiApi {
       final placemarks = await placemarkFromCoordinates(lat, lng);
       if (placemarks.isEmpty) return null;
       final place = placemarks.first;
-      final parts = <String>[
-        if ((place.locality ?? '').trim().isNotEmpty) place.locality!.trim(),
-        if ((place.subAdministrativeArea ?? '').trim().isNotEmpty)
-          place.subAdministrativeArea!.trim(),
-      ];
-      if (parts.isEmpty) {
-        final country = (place.country ?? '').trim();
-        return country.isEmpty ? null : country;
-      }
-      return parts.join(', ');
+      final resolved = _compactLocationLabel({
+        'suburb': place.subLocality,
+        'city': place.locality,
+        'state_district': place.subAdministrativeArea,
+        'state': place.administrativeArea,
+        'country': place.country,
+      });
+      if (resolved != null) return resolved;
+    } catch (_) {
+      // Fall back to HTTP reverse geocoding on platforms without geocoding support.
+    }
+
+    return _resolveLocationNameFromNetwork(lat, lng);
+  }
+
+  Future<String?> _resolveLocationNameFromNetwork(double lat, double lng) async {
+    try {
+      final uri = Uri.parse(
+        '$_nominatimBaseUrl?lat=$lat&lon=$lng&format=jsonv2&addressdetails=1&zoom=14',
+      );
+      final resp = await http
+          .get(uri, headers: _reverseGeocodeHeaders)
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) return null;
+
+      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final address = json['address'] as Map<String, dynamic>?;
+      final resolved = _compactLocationLabel(address);
+      if (resolved != null) return resolved;
+
+      final displayName = (json['display_name'] as String?)?.trim();
+      if (displayName == null || displayName.isEmpty) return null;
+      return displayName.split(',').take(3).join(', ').trim();
     } catch (_) {
       return null;
     }
+  }
+
+  String? _compactLocationLabel(Map<String, dynamic>? address) {
+    if (address == null) return null;
+
+    final candidates = <String?>[
+      address['suburb']?.toString(),
+      address['neighbourhood']?.toString(),
+      address['hamlet']?.toString(),
+      address['village']?.toString(),
+      address['town']?.toString(),
+      address['city']?.toString(),
+      address['municipality']?.toString(),
+      address['county']?.toString(),
+      address['state_district']?.toString(),
+      address['state']?.toString(),
+      address['country']?.toString(),
+    ];
+
+    final parts = <String>[];
+    for (final candidate in candidates) {
+      final value = candidate?.trim();
+      if (value == null || value.isEmpty) continue;
+      final exists = parts.any(
+        (part) => part.toLowerCase() == value.toLowerCase(),
+      );
+      if (!exists) {
+        parts.add(value);
+      }
+      if (parts.length == 2) break;
+    }
+
+    if (parts.isEmpty) return null;
+    return parts.join(', ');
   }
 
   double? _distanceFromUser({

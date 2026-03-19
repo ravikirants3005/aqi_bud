@@ -178,6 +178,14 @@ class _WeeklyPatternCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final weeklyExposure = dashboard.weeklyExposure;
+    if (weeklyExposure.length < 2) {
+      return const _EmptyTrendCard(
+        title: 'Weekly AQI Pattern',
+        message:
+            'We need a bit more history before the weekly pattern becomes meaningful.',
+      );
+    }
+
     final maxScore = weeklyExposure
         .map((record) => record.score)
         .reduce((a, b) => a > b ? a : b);
@@ -206,7 +214,7 @@ class _WeeklyPatternCard extends StatelessWidget {
                   child: _SummaryStat(
                     label: 'Best day',
                     value:
-                        '${DateFormat('EEE').format(dashboard.bestDay.date)} · ${dashboard.bestDay.maxAqi}',
+                        '${DateFormat('EEE').format(dashboard.bestDay.date)} | ${dashboard.bestDay.maxAqi}',
                     color: Colors.green,
                   ),
                 ),
@@ -215,7 +223,7 @@ class _WeeklyPatternCard extends StatelessWidget {
                   child: _SummaryStat(
                     label: 'Worst day',
                     value:
-                        '${DateFormat('EEE').format(dashboard.worstDay.date)} · ${dashboard.worstDay.maxAqi}',
+                        '${DateFormat('EEE').format(dashboard.worstDay.date)} | ${dashboard.worstDay.maxAqi}',
                     color: Theme.of(context).colorScheme.error,
                   ),
                 ),
@@ -286,6 +294,14 @@ class _MonthlyTrendCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final monthlyExposure = dashboard.monthlyExposure;
+    if (monthlyExposure.length < 2) {
+      return const _EmptyTrendCard(
+        title: '30-Day AQI Trend',
+        message:
+            'Monthly trend data is not available yet. Keep using the app and refresh after location data loads.',
+      );
+    }
+
     final spots = <FlSpot>[];
     for (var i = 0; i < monthlyExposure.length; i++) {
       spots.add(FlSpot(i.toDouble(), monthlyExposure[i].score));
@@ -357,8 +373,7 @@ class _MonthlyTrendCard extends StatelessWidget {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
-                              DateFormat('d')
-                                  .format(monthlyExposure[index].date),
+                              DateFormat('d').format(monthlyExposure[index].date),
                               style: const TextStyle(fontSize: 10),
                             ),
                           );
@@ -480,7 +495,7 @@ class _LocationInsightsCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Weekly avg ${insight.weeklyAverageAqi.toStringAsFixed(0)} · Worst ${insight.worstAqi}',
+                        'Weekly avg ${insight.weeklyAverageAqi.toStringAsFixed(0)} | Worst ${insight.worstAqi}',
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
@@ -692,6 +707,41 @@ class _SummaryStat extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _EmptyTrendCard extends StatelessWidget {
+  const _EmptyTrendCard({
+    required this.title,
+    required this.message,
+  });
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
