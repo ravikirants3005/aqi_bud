@@ -1,0 +1,4 @@
+{
+  "aqiProvider": "openaq",
+  "aqiApiKey": "YOUR_OPENAQ_API_KEY"
+}

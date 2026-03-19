@@ -111,6 +111,27 @@ Without Firebase configured, the app runs using **local auth** (email+password s
 
 AQI data is fetched from [Open-Meteo Air Quality API](https://open-meteo.com/en/docs/air-quality-api) (no API key required). Data is cached for 30 minutes per REQ-6.2.
 
+### Real-time AQI API key
+
+The app supports a keyed live AQI provider for current-location reads.
+
+Local setup:
+
+1. Copy `assets/config/runtime_config.example.json`
+2. Create `assets/config/runtime_config.json`
+3. Fill in your provider and API key
+
+Example:
+
+```json
+{
+  "aqiProvider": "aqicn",
+  "aqiApiKey": "YOUR_API_KEY"
+}
+```
+
+`assets/config/runtime_config.json` is ignored by git so secrets stay local. If the file is missing, the app falls back to Open-Meteo.
+
 ## License
 
 Proprietary - Vayu Aarambh Innovations Pvt. Ltd.

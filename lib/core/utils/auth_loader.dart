@@ -1,6 +1,8 @@
 /// Loads saved auth on app start
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -19,7 +21,10 @@ class _AuthLoaderState extends ConsumerState<AuthLoader> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadAuth());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_loadAuth());
+      unawaited(_bootstrapLocation());
+    });
   }
 
   Future<void> _loadAuth() async {
@@ -28,6 +33,16 @@ class _AuthLoaderState extends ConsumerState<AuthLoader> {
     if (user != null && mounted) {
       ref.read(userProfileProvider.notifier).setProfile(user);
     }
+  }
+
+  Future<void> _bootstrapLocation() async {
+    final granted = await ensureLocationPermission(requestIfNeeded: true);
+    if (!mounted || !granted) return;
+
+    ref.invalidate(locationProvider);
+    ref.invalidate(currentAqiProvider);
+    ref.invalidate(aqiTrendsProvider);
+    ref.invalidate(exposureDashboardProvider);
   }
 
   @override

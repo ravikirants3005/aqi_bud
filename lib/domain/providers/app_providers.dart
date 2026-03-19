@@ -5,10 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/api/aqi_api.dart';
 import '../../data/models/aqi_models.dart';
+import '../../data/models/exposure_models.dart';
 import '../../data/models/user_models.dart';
 import '../../data/repositories/aqi_repository.dart';
 import '../../data/repositories/education_repository.dart';
@@ -21,7 +23,10 @@ final sharedPrefsProvider = FutureProvider<SharedPreferences>(
   (_) => SharedPreferences.getInstance(),
 );
 
-final aqiApiProvider = Provider<AqiApi>((_) => AqiApi());
+final aqiApiProvider = Provider<AqiApi>((ref) {
+  final config = ref.watch(runtimeConfigProvider);
+  return AqiApi(config: config);
+});
 final aqiRepoProvider = Provider<AqiRepository>((ref) {
   final prefs = ref.watch(sharedPrefsProvider).valueOrNull;
   return AqiRepository(api: ref.watch(aqiApiProvider), prefs: prefs);
@@ -39,16 +44,44 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepository(prefs: prefs);
 });
 
-final locationProvider = FutureProvider<Position?>((_) async {
+Future<bool> ensureLocationPermission({
+  bool requestIfNeeded = false,
+}) async {
   final enabled = await Geolocator.isLocationServiceEnabled();
-  if (!enabled) return null;
-  final perm = await Geolocator.checkPermission();
-  if (perm == LocationPermission.denied) {
-    final req = await Geolocator.requestPermission();
-    if (req != LocationPermission.whileInUse && req != LocationPermission.always) return null;
+  if (!enabled) return false;
+
+  var permission = await Geolocator.checkPermission();
+  if (permission == LocationPermission.denied && requestIfNeeded) {
+    permission = await Geolocator.requestPermission();
   }
-  return Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium));
+
+  return permission == LocationPermission.whileInUse ||
+      permission == LocationPermission.always;
+}
+
+final locationProvider = FutureProvider<Position?>((_) async {
+  final hasPermission = await ensureLocationPermission();
+  if (!hasPermission) return null;
+
+  Position? lastKnown;
+  try {
+    lastKnown = await Geolocator.getLastKnownPosition();
+  } catch (_) {
+    lastKnown = null;
+  }
+
+  try {
+    final current = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        timeLimit: Duration(seconds: 15),
+      ),
+    );
+    if (lastKnown == null) return current;
+    return current.accuracy <= lastKnown.accuracy ? current : lastKnown;
+  } catch (_) {
+    return lastKnown;
+  }
 });
 
 final currentAqiProvider = FutureProvider<AqiData?>((ref) async {
@@ -63,6 +96,45 @@ final aqiTrendsProvider = FutureProvider<Map<String, List<AqiTrendDay>>>((ref) a
   if (pos == null) return {'week': [], 'month': []};
   final repo = ref.watch(aqiRepoProvider);
   return repo.getAqiTrends(pos.latitude, pos.longitude);
+});
+
+final exposureDashboardProvider =
+    FutureProvider<ExposureDashboardData?>((ref) async {
+  final currentAqi = await ref.watch(currentAqiProvider.future);
+  if (currentAqi == null) return null;
+
+  final trends = await ref.watch(aqiTrendsProvider.future);
+  final profile = ref.watch(userProfileProvider);
+  final savedLocations = profile?.savedLocations ?? const <SavedLocation>[];
+  final sensitivity =
+      profile?.healthSensitivity ?? HealthSensitivity.normal;
+  final aqiRepo = ref.watch(aqiRepoProvider);
+  final exposureRepo = ref.watch(exposureRepoProvider);
+
+  final locationCurrentAqiEntries =
+      await Future.wait(savedLocations.map((location) async {
+    final data = await aqiRepo.getCurrentAqi(location.lat, location.lng);
+    return MapEntry(location.id, data);
+  }));
+  final locationTrendEntries =
+      await Future.wait(savedLocations.map((location) async {
+    final data = await aqiRepo.getAqiTrends(location.lat, location.lng);
+    return MapEntry(location.id, data['week'] ?? const <AqiTrendDay>[]);
+  }));
+
+  return exposureRepo.buildDashboard(
+    currentAqi: currentAqi,
+    weeklyTrend: trends['week'] ?? const <AqiTrendDay>[],
+    monthlyTrend: trends['month'] ?? const <AqiTrendDay>[],
+    savedLocations: savedLocations,
+    healthSensitivity: sensitivity,
+    locationCurrentAqi: {
+      for (final entry in locationCurrentAqiEntries) entry.key: entry.value,
+    },
+    locationTrends: {
+      for (final entry in locationTrendEntries) entry.key: entry.value,
+    },
+  );
 });
 
 final userProfileProvider = StateNotifierProvider<UserProfileNotifier, UserProfile?>((ref) {

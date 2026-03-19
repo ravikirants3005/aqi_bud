@@ -6,14 +6,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 
+import 'core/config/runtime_config.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/firebase/firebase_service.dart';
 import 'core/utils/auth_loader.dart';
 
+final runtimeConfigProvider = Provider<RuntimeConfig>((_) => RuntimeConfig.fallback);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initFirebase();
+  final runtimeConfig = await RuntimeConfig.load();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -22,6 +26,9 @@ void main() async {
   );
   runApp(
     ProviderScope(
+      overrides: [
+        runtimeConfigProvider.overrideWithValue(runtimeConfig),
+      ],
       child: AuthLoader(
         child: const AqiBuddyApp(),
       ),
