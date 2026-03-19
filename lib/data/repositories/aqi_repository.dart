@@ -203,5 +203,5 @@ class AqiRepository {
   }
 
   String _locationKey(double lat, double lng) =>
-      '${lat.toStringAsFixed(3)},${lng.toStringAsFixed(3)}';
+      '${lat.toStringAsFixed(4)},${lng.toStringAsFixed(4)}';
 }

@@ -57,7 +57,7 @@ class HomeScreen extends ConsumerWidget {
               trendsAsync.when(
                 data: (trends) {
                   final week = trends['week'] ?? [];
-                  return _sevenDayTrend(context, week);
+                  return _sevenDayTrend(context, week, aqiAsync.valueOrNull);
                 },
                 loading: () => const SizedBox(
                   height: 120,
@@ -235,7 +235,13 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
-  Widget _sevenDayTrend(BuildContext context, List<AqiTrendDay> week) {
+  Widget _sevenDayTrend(
+    BuildContext context,
+    List<AqiTrendDay> week,
+    AqiData? currentData,
+  ) {
+    final trackedLocation = currentData == null ? null : _locationLabel(currentData);
+
     if (week.length < 2) {
       return Card(
         child: Padding(
@@ -248,8 +254,18 @@ class HomeScreen extends ConsumerWidget {
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
+              if (trackedLocation != null) ...[
+                Text(
+                  'Tracking: $trackedLocation',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               Text(
-                'Trend data is still loading. Pull to refresh after location access is available.',
+                'Trend history for this live location is still loading.',
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -274,12 +290,26 @@ class HomeScreen extends ConsumerWidget {
                   '7-Day AQI Trend',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
-                Text(
-                  'Worst: ${worst.maxAqi}',
-                  style: TextStyle(
-                    color: Color(aqiToCategory(worst.maxAqi).colorValue),
-                    fontWeight: FontWeight.w600,
-                  ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (trackedLocation != null)
+                      Text(
+                        trackedLocation,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    Text(
+                      'Worst: ${worst.maxAqi}',
+                      style: TextStyle(
+                        color: Color(aqiToCategory(worst.maxAqi).colorValue),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

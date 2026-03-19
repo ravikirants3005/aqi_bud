@@ -1,6 +1,7 @@
 /// App navigation - go_router
 library;
 
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/screens/login_screen.dart';
@@ -13,7 +14,10 @@ import '../../features/profile/screens/profile_screen.dart';
 import '../../features/profile/screens/saved_locations_screen.dart';
 import '../../features/suggestions/screens/suggestions_screen.dart';
 
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+
 final goRouter = GoRouter(
+  navigatorKey: rootNavigatorKey,
   initialLocation: '/',
   routes: [
     GoRoute(
