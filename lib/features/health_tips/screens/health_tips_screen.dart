@@ -46,6 +46,10 @@ class _HealthTipsScreenState extends ConsumerState<HealthTipsScreen>
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
+          indicatorColor: const Color(0xFF69F6B8),
+          labelColor: const Color(0xFF69F6B8),
+          unselectedLabelColor: Colors.white60,
+          dividerColor: Colors.transparent,
           tabs: categories.map((c) => Tab(text: c[0].toUpperCase() + c.substring(1))).toList(),
         ),
       ),
@@ -219,12 +223,20 @@ class _BreathingAnimation extends AnimatedWidget {
           height: 120 * breath.value,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
+            color: const Color(0xFF69F6B8).withValues(alpha: 0.15),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF69F6B8).withValues(alpha: 0.2),
+                blurRadius: 40 * ctrl.value,
+                spreadRadius: 20 * ctrl.value,
+              ),
+            ],
+            border: Border.all(color: const Color(0xFF69F6B8).withValues(alpha: 0.3)),
           ),
           child: Center(
             child: Text(
               ctrl.value < 0.5 ? 'Breathe In' : 'Breathe Out',
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF69F6B8)),
             ),
           ),
         );

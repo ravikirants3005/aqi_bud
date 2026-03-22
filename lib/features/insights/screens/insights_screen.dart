@@ -21,23 +21,20 @@ class InsightsScreen extends ConsumerWidget {
     final currentAqiAsync = ref.watch(currentAqiProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF081217),
+      backgroundColor: const Color(0xFF060E20),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF12242B),
+        backgroundColor: const Color(0xFF060E20),
         foregroundColor: Colors.white,
-        title: const Text('Exposure Insights'),
+        title: const Text('Exposure Insights', style: TextStyle(fontWeight: FontWeight.w700)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
         ),
+        elevation: 0,
       ),
       body: Container(
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF081217), Color(0xFF0D1A21), Color(0xFF122A34)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
+          color: Color(0xFF060E20),
         ),
         child: dashboardAsync.when(
           data: (dashboard) {
@@ -265,7 +262,7 @@ class _WeeklyPatternCard extends StatelessWidget {
                     label: 'Best day',
                     value:
                         '${DateFormat('EEE').format(bestDay.date)} | ${bestDay.maxAqi}',
-                    color: Colors.green,
+                    color: const Color(0xFF69F6B8),
                   ),
                 ),
                 const SizedBox(width: 12),

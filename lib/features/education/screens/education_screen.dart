@@ -34,9 +34,10 @@ class EducationScreen extends ConsumerWidget {
             margin: const EdgeInsets.only(bottom: 12),
             child: ListTile(
               leading: CircleAvatar(
+                backgroundColor: const Color(0xFF69F6B8).withValues(alpha: 0.15),
                 child: Icon(
                   t.id == 'what_is_aqi' ? Icons.help : Icons.science,
-                  color: Theme.of(context).colorScheme.onPrimary,
+                  color: const Color(0xFF69F6B8),
                 ),
               ),
               title: Text(t.title, style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -82,8 +83,10 @@ class _TopicDetailScreen extends StatelessWidget {
           children: [
             if (topic.kidFriendly)
               Chip(
-                label: const Text('Kid-friendly'),
-                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                label: const Text('Kid-friendly', style: TextStyle(color: Color(0xFFF8A010), fontWeight: FontWeight.bold)),
+                backgroundColor: const Color(0xFFF8A010).withValues(alpha: 0.15),
+                side: BorderSide.none,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
               ),
             const SizedBox(height: 16),
             Text(

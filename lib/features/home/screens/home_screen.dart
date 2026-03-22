@@ -25,9 +25,9 @@ class HomeScreen extends ConsumerWidget {
     final profile = ref.watch(userProfileProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF081217),
+      backgroundColor: const Color(0xFF060E20),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF12242B),
+        backgroundColor: const Color(0xFF060E20),
         foregroundColor: Colors.white,
         title: const Text('AQI Buddy'),
         actions: [
@@ -39,11 +39,7 @@ class HomeScreen extends ConsumerWidget {
       ),
       body: Container(
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF081217), Color(0xFF0D1A21), Color(0xFF122A34)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
+          color: Color(0xFF060E20),
         ),
         child: RefreshIndicator(
           onRefresh: () async {
@@ -125,8 +121,8 @@ class HomeScreen extends ConsumerWidget {
   Widget _bottomNav(BuildContext context) {
     return NavigationBarTheme(
       data: NavigationBarThemeData(
-        backgroundColor: const Color(0xFF142228),
-        indicatorColor: const Color(0xFF29434B),
+        backgroundColor: const Color(0xFF091328),
+        indicatorColor: const Color(0xFF192540),
         labelTextStyle: MaterialStatePropertyAll(
           TextStyle(
             color: Theme.of(context).colorScheme.onSurface,
@@ -251,9 +247,9 @@ class _HeroCard extends StatelessWidget {
     return _Panel(
       gradient: LinearGradient(
         colors: [
-          const Color(0xFF121B20),
-          accent.withValues(alpha: 0.22),
-          const Color(0xFF16323B),
+          const Color(0xFF0F1930),
+          accent.withValues(alpha: 0.10),
+          const Color(0xFF192540),
         ],
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
@@ -274,7 +270,7 @@ class _HeroCard extends StatelessWidget {
                     _Pill(
                       icon: Icons.place_outlined,
                       label: _locationLabel(data),
-                      color: const Color(0xFF1FC7E3),
+                      color: const Color(0xFF69F6B8),
                     ),
                   ],
                 ),
@@ -334,9 +330,19 @@ class _HeroCard extends StatelessWidget {
               ],
             );
 
-            final gauge = SizedBox(
+            final gauge = Container(
               width: 220,
               height: 220,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withValues(alpha: 0.12),
+                    blurRadius: 40,
+                    spreadRadius: 20,
+                  ),
+                ],
+              ),
               child: Stack(
                 alignment: Alignment.center,
                 children: [
@@ -345,7 +351,7 @@ class _HeroCard extends StatelessWidget {
                     height: 180,
                     child: CircularProgressIndicator(
                       value: (data.aqi / 500).clamp(0.0, 1.0),
-                      strokeWidth: 16,
+                      strokeWidth: 8,
                       backgroundColor: accent.withValues(alpha: 0.12),
                       valueColor: AlwaysStoppedAnimation<Color>(accent),
                     ),
@@ -452,7 +458,7 @@ class _HourlyHistoryCard extends StatelessWidget {
               runSpacing: 12,
               children: [
                 _StatChip(label: 'Now', value: '${last24.last.aqi}', accent: Color(aqiToCategory(last24.last.aqi).colorValue)),
-                _StatChip(label: '24h Avg', value: '$avgAqi', accent: const Color(0xFF20C5D8)),
+                _StatChip(label: '24h Avg', value: '$avgAqi', accent: const Color(0xFF69F6B8)),
                 _StatChip(label: '24h Max', value: '$maxAqi', accent: Color(aqiToCategory(maxAqi).colorValue)),
                 _StatChip(label: '24h Min', value: '$minAqi', accent: Color(aqiToCategory(minAqi).colorValue)),
               ],
@@ -508,7 +514,7 @@ class _HourlyHistoryCard extends StatelessWidget {
                   ),
                   lineTouchData: LineTouchData(
                     touchTooltipData: LineTouchTooltipData(
-                      getTooltipColor: (_) => const Color(0xFF13242A),
+                      getTooltipColor: (_) => const Color(0xFF141F38),
                       getTooltipItems: (spots) => spots.map((spot) {
                         final point = last24[spot.x.toInt()];
                         return LineTooltipItem(
@@ -606,7 +612,7 @@ class _SevenDayCard extends StatelessWidget {
               children: [
                 _StatChip(label: 'Best day', value: '${DateFormat('EEE').format(best.date)} ${best.maxAqi}', accent: Color(aqiToCategory(best.maxAqi).colorValue)),
                 _StatChip(label: 'Worst day', value: '${DateFormat('EEE').format(worst.date)} ${worst.maxAqi}', accent: Color(aqiToCategory(worst.maxAqi).colorValue)),
-                _StatChip(label: '7d Avg', value: '$average', accent: const Color(0xFF20C5D8)),
+                _StatChip(label: '7d Avg', value: '$average', accent: const Color(0xFF69F6B8)),
               ],
             ),
             const SizedBox(height: 22),
@@ -628,7 +634,7 @@ class _SevenDayCard extends StatelessWidget {
                   borderData: FlBorderData(show: false),
                   barTouchData: BarTouchData(
                     touchTooltipData: BarTouchTooltipData(
-                      getTooltipColor: (_) => const Color(0xFF13242A),
+                      getTooltipColor: (_) => const Color(0xFF141F38),
                       getTooltipItem: (group, groupIndex, rod, rodIndex) {
                         final day = week[group.x.toInt()];
                         return BarTooltipItem(
@@ -710,14 +716,14 @@ class _ActionDeck extends StatelessWidget {
           title: 'Suggestions',
           subtitle: 'Practical pre, during and post outdoor guidance.',
           icon: Icons.tips_and_updates_outlined,
-          accent: const Color(0xFF21C9B5),
+          accent: const Color(0xFF69F6B8),
           onTap: () => context.push('/suggestions'),
         );
         final insights = _ActionCard(
           title: 'Exposure Insights',
           subtitle: 'Break down weekly and monthly AQI history in detail.',
           icon: Icons.insights_outlined,
-          accent: const Color(0xFF20C5D8),
+          accent: const Color(0xFFF8A010),
           onTap: () => context.push('/insights'),
         );
 
@@ -801,9 +807,9 @@ class _Panel extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
-        color: gradient == null ? const Color(0xFF111A1F).withValues(alpha: 0.92) : null,
+        color: gradient == null ? const Color(0xFF0F1930) : null,
         gradient: gradient,
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
       ),
       child: child,
     );
@@ -883,11 +889,11 @@ class _ActionCard extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(24),
           gradient: LinearGradient(
-            colors: [const Color(0xFF111A1F), accent.withValues(alpha: 0.14)],
+            colors: [const Color(0xFF0F1930), accent.withValues(alpha: 0.10)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          border: Border.all(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
         ),
         child: Padding(
           padding: const EdgeInsets.all(18),
@@ -946,7 +952,7 @@ class _Pill extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
         color: color.withValues(alpha: 0.12),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
+        border: Border.all(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -984,7 +990,7 @@ class _MetricTile extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         color: Colors.black.withValues(alpha: 0.24),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1022,7 +1028,7 @@ class _StatChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: accent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: accent.withValues(alpha: 0.26)),
+        border: Border.all(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

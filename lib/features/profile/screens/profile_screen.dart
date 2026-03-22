@@ -42,14 +42,15 @@ class ProfileScreen extends ConsumerWidget {
           Center(
             child: CircleAvatar(
               radius: 48,
-              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              backgroundColor: const Color(0xFF69F6B8).withValues(alpha: 0.15),
               child: profile?.photoUrl != null
                   ? null
                   : Text(
                       (profile?.displayName ?? 'U')[0].toUpperCase(),
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 36,
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        color: Color(0xFF69F6B8),
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
             ),
@@ -95,6 +96,16 @@ class ProfileScreen extends ConsumerWidget {
               return FilterChip(
                 label: Text(s.label),
                 selected: selected,
+                backgroundColor: const Color(0xFF0F1930),
+                selectedColor: const Color(0xFF69F6B8).withValues(alpha: 0.15),
+                checkmarkColor: const Color(0xFF69F6B8),
+                labelStyle: TextStyle(
+                  color: selected ? const Color(0xFF69F6B8) : Colors.white70,
+                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                ),
+                side: BorderSide(
+                  color: selected ? const Color(0xFF69F6B8).withValues(alpha: 0.5) : const Color(0xFF40485D).withValues(alpha: 0.15),
+                ),
                 onSelected: (_) {
                   ref.read(userProfileProvider.notifier).updateSensitivity(s);
                 },

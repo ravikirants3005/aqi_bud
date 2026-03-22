@@ -1,65 +1,73 @@
+/// Material Design 3 theme - REQ 3.1 UI
+library;
+
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-const Color darkSurface = Color(0xFF060E20);
-const Color darkSurfaceContainerLowest = Color(0xFF000000);
-const Color darkSurfaceContainerLow = Color(0xFF091328);
-const Color darkSurfaceContainer = Color(0xFF0F1930);
-const Color darkSurfaceContainerHigh = Color(0xFF141F38);
-const Color darkSurfaceContainerHighest = Color(0xFF192540);
-const Color darkSurfaceBright = Color(0xFF1F2B49);
+final Color _surface = const Color(0xFF060E20);
+final Color _primary = const Color(0xFF69F6B8);
+final Color _onSurface = const Color(0xFFDEE5FF);
 
-const Color darkPrimary = Color(0xFF69F6B8);
-const Color darkPrimaryContainer = Color(0xFF06B77F);
-const Color darkOnPrimary = Color(0xFF005A3C);
+final ThemeData appLightTheme = _buildDarkTheme();
+final ThemeData appDarkTheme = _buildDarkTheme();
 
-const Color darkSecondary = Color(0xFFF8A010);
-const Color darkTertiary = Color(0xFFFF716A);
-const Color darkError = Color(0xFFFF716C);
-
-const Color darkOnSurface = Color(0xFFDEE5FF);
-const Color darkOnSurfaceVariant = Color(0xFFA3AAC4);
-const Color darkOutlineVariant = Color(0xFF40485D);
-
-final ThemeData appDarkTheme = ThemeData(
-  brightness: Brightness.dark,
-  colorScheme: const ColorScheme.dark(
-    surface: darkSurface,
-    primary: darkPrimary,
-    primaryContainer: darkPrimaryContainer,
-    onPrimary: darkOnPrimary,
-    secondary: darkSecondary,
-    tertiary: darkTertiary,
-    error: darkError,
-    onSurface: darkOnSurface,
-    onSurfaceVariant: darkOnSurfaceVariant,
-    surfaceContainerLowest: darkSurfaceContainerLowest,
-    surfaceContainerLow: darkSurfaceContainerLow,
-    surfaceContainer: darkSurfaceContainer,
-    surfaceContainerHigh: darkSurfaceContainerHigh,
-    surfaceContainerHighest: darkSurfaceContainerHighest,
-    outlineVariant: darkOutlineVariant,
-  ),
-  scaffoldBackgroundColor: darkSurface,
-  fontFamily: 'Inter',
-  appBarTheme: const AppBarTheme(
-    backgroundColor: Colors.transparent,
-    elevation: 0,
-    centerTitle: false,
-    titleTextStyle: TextStyle(
-      fontFamily: 'Inter',
-      fontWeight: FontWeight.w600,
-      fontSize: 20,
-      color: darkOnSurface,
+ThemeData _buildDarkTheme() {
+  final baseTheme = ThemeData(
+    useMaterial3: true,
+    brightness: Brightness.dark,
+    scaffoldBackgroundColor: _surface,
+    colorScheme: ColorScheme.dark(
+      surface: _surface,
+      primary: _primary,
+      secondary: const Color(0xFFF8A010),
+      error: const Color(0xFFFF716A),
+      onSurface: _onSurface,
+      onPrimary: const Color(0xFF005A3C),
     ),
-  ),
-  bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-    backgroundColor: darkSurfaceContainerLowest,
-    selectedItemColor: darkPrimary,
-    unselectedItemColor: darkOnSurfaceVariant,
-    type: BottomNavigationBarType.fixed,
-    elevation: 8,
-  ),
-  useMaterial3: true,
-);
+  );
 
-final ThemeData appLightTheme = appDarkTheme; // Forcing dark mode for the premium experience as requested.
+  return baseTheme.copyWith(
+    textTheme: GoogleFonts.interTextTheme(baseTheme.textTheme).copyWith(
+      displayLarge: GoogleFonts.inter(
+          fontSize: 56,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -2.2,
+          color: _onSurface),
+      headlineMedium: GoogleFonts.inter(
+          fontSize: 28,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.5,
+          color: _onSurface),
+      bodyLarge: GoogleFonts.inter(
+          fontSize: 16, height: 1.6, color: _onSurface),
+      labelMedium: GoogleFonts.inter(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: const Color(0xFFA3AAC4)),
+    ),
+    appBarTheme: AppBarTheme(
+      backgroundColor: _surface,
+      foregroundColor: _onSurface,
+      elevation: 0,
+      centerTitle: true,
+    ),
+    cardTheme: CardThemeData(
+      color: const Color(0xFF0F1930),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
+      ),
+      margin: EdgeInsets.zero,
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: _primary,
+        foregroundColor: const Color(0xFF005A3C),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
+        elevation: 0,
+      ),
+    ),
+  );
+}
