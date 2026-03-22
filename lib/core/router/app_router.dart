@@ -1,60 +1,54 @@
-/// App navigation - go_router
-library;
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/auth/screens/login_screen.dart';
-import '../../features/auth/screens/register_screen.dart';
-import '../../features/education/screens/education_screen.dart';
-import '../../features/health_tips/screens/health_tips_screen.dart';
-import '../../features/home/screens/home_screen.dart';
-import '../../features/insights/screens/insights_screen.dart';
-import '../../features/profile/screens/profile_screen.dart';
-import '../../features/profile/screens/saved_locations_screen.dart';
-import '../../features/suggestions/screens/suggestions_screen.dart';
+import '../../features/home/home_screen.dart';
+import '../../features/insights/insights_screen.dart';
+import '../../features/education/education_screen.dart';
+import '../../features/profile/profile_screen.dart';
+import '../../features/suggestions/suggestions_screen.dart';
+import '../../features/health_tips/health_tips_screen.dart';
+import 'main_wrapper.dart';
 
-final rootNavigatorKey = GlobalKey<NavigatorState>();
+final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'root');
+final GlobalKey<NavigatorState> _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
-final goRouter = GoRouter(
-  navigatorKey: rootNavigatorKey,
+final GoRouter goRouter = GoRouter(
+  navigatorKey: _rootNavigatorKey,
   initialLocation: '/',
   routes: [
-    GoRoute(
-      path: '/',
-      builder: (context, state) => const HomeScreen(),
-    ),
-    GoRoute(
-      path: '/login',
-      builder: (context, state) => const LoginScreen(),
-    ),
-    GoRoute(
-      path: '/register',
-      builder: (context, state) => const RegisterScreen(),
-    ),
-    GoRoute(
-      path: '/suggestions',
-      builder: (context, state) => const SuggestionsScreen(),
-    ),
-    GoRoute(
-      path: '/health-tips',
-      builder: (context, state) => const HealthTipsScreen(),
-    ),
-    GoRoute(
-      path: '/profile',
-      builder: (context, state) => const ProfileScreen(),
-    ),
-    GoRoute(
-      path: '/insights',
-      builder: (context, state) => const InsightsScreen(),
-    ),
-    GoRoute(
-      path: '/education',
-      builder: (context, state) => const EducationScreen(),
-    ),
-    GoRoute(
-      path: '/saved-locations',
-      builder: (context, state) => const SavedLocationsScreen(),
+    ShellRoute(
+      navigatorKey: _shellNavigatorKey,
+      builder: (context, state, child) {
+        return MainWrapper(child: child);
+      },
+      routes: [
+        GoRoute(
+          path: '/',
+          builder: (context, state) => const HomeScreen(),
+          routes: [
+            GoRoute(
+              path: 'suggestions',
+              builder: (context, state) => const SuggestionsScreen(),
+            ),
+            GoRoute(
+              path: 'health-tips',
+              builder: (context, state) => const HealthTipsScreen(),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/insights',
+          builder: (context, state) => const InsightsScreen(),
+        ),
+        GoRoute(
+          path: '/education',
+          builder: (context, state) => const EducationScreen(),
+        ),
+        GoRoute(
+          path: '/profile',
+          builder: (context, state) => const ProfileScreen(),
+        ),
+      ],
     ),
   ],
 );
