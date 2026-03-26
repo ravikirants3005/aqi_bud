@@ -18,6 +18,8 @@ import '../../data/repositories/exposure_repository.dart';
 import '../../data/repositories/health_tips_repository.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/suggestions_repository.dart';
+import '../../data/repositories/notification_repository.dart';
+import '../../data/repositories/backend_repository.dart';
 
 final sharedPrefsProvider = FutureProvider<SharedPreferences>(
   (_) => SharedPreferences.getInstance(),
@@ -31,22 +33,36 @@ final aqiRepoProvider = Provider<AqiRepository>((ref) {
   final prefs = ref.watch(sharedPrefsProvider).valueOrNull;
   return AqiRepository(api: ref.watch(aqiApiProvider), prefs: prefs);
 });
-final suggestionsRepoProvider = Provider<SuggestionsRepository>((_) => SuggestionsRepository());
-final healthTipsRepoProvider = Provider<HealthTipsRepository>((_) => HealthTipsRepository());
+final suggestionsRepoProvider = Provider<SuggestionsRepository>(
+  (_) => SuggestionsRepository(),
+);
+final healthTipsRepoProvider = Provider<HealthTipsRepository>(
+  (_) => HealthTipsRepository(),
+);
 final exposureRepoProvider = Provider<ExposureRepository>((ref) {
   final prefs = ref.watch(sharedPrefsProvider).valueOrNull;
   return ExposureRepository(prefs: prefs);
 });
-final educationRepoProvider = Provider<EducationRepository>((_) => EducationRepository());
+final educationRepoProvider = Provider<EducationRepository>(
+  (_) => EducationRepository(),
+);
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
   final prefs = ref.watch(sharedPrefsProvider).valueOrNull;
   return AuthRepository(prefs: prefs);
 });
 
-Future<bool> ensureLocationPermission({
-  bool requestIfNeeded = false,
-}) async {
+final notificationRepositoryProvider = Provider<NotificationRepository>((ref) {
+  final prefs = ref.watch(sharedPrefsProvider).valueOrNull;
+  return NotificationRepository(prefs: prefs);
+});
+
+final backendRepositoryProvider = Provider<BackendRepository>((ref) {
+  final config = ref.watch(runtimeConfigProvider);
+  return BackendRepository(config: config);
+});
+
+Future<bool> ensureLocationPermission({bool requestIfNeeded = false}) async {
   final enabled = await Geolocator.isLocationServiceEnabled();
   if (!enabled) return false;
 
@@ -91,43 +107,49 @@ final currentAqiProvider = FutureProvider<AqiData?>((ref) async {
   return repo.getCurrentAqi(pos.latitude, pos.longitude);
 });
 
-final aqiHourlyHistoryProvider = FutureProvider<List<AqiHourlyPoint>>((ref) async {
+final aqiHourlyHistoryProvider = FutureProvider<List<AqiHourlyPoint>>((
+  ref,
+) async {
   final pos = await ref.watch(locationProvider.future);
   if (pos == null) return const <AqiHourlyPoint>[];
   final repo = ref.watch(aqiRepoProvider);
   return repo.getAqiHistory(pos.latitude, pos.longitude);
 });
 
-final aqiTrendsProvider = FutureProvider<Map<String, List<AqiTrendDay>>>((ref) async {
+final aqiTrendsProvider = FutureProvider<Map<String, List<AqiTrendDay>>>((
+  ref,
+) async {
   final history = await ref.watch(aqiHourlyHistoryProvider.future);
   if (history.isEmpty) return {'week': [], 'month': []};
   final repo = ref.watch(aqiRepoProvider);
   return repo.buildTrendsFromHistory(history);
 });
 
-final exposureDashboardProvider =
-    FutureProvider<ExposureDashboardData?>((ref) async {
+final exposureDashboardProvider = FutureProvider<ExposureDashboardData?>((
+  ref,
+) async {
   final currentAqi = await ref.watch(currentAqiProvider.future);
   if (currentAqi == null) return null;
 
   final trends = await ref.watch(aqiTrendsProvider.future);
   final profile = ref.watch(userProfileProvider);
   final savedLocations = profile?.savedLocations ?? const <SavedLocation>[];
-  final sensitivity =
-      profile?.healthSensitivity ?? HealthSensitivity.normal;
+  final sensitivity = profile?.healthSensitivity ?? HealthSensitivity.normal;
   final aqiRepo = ref.watch(aqiRepoProvider);
   final exposureRepo = ref.watch(exposureRepoProvider);
 
-  final locationCurrentAqiEntries =
-      await Future.wait(savedLocations.map((location) async {
-    final data = await aqiRepo.getCurrentAqi(location.lat, location.lng);
-    return MapEntry(location.id, data);
-  }));
-  final locationTrendEntries =
-      await Future.wait(savedLocations.map((location) async {
-    final data = await aqiRepo.getAqiTrends(location.lat, location.lng);
-    return MapEntry(location.id, data['week'] ?? const <AqiTrendDay>[]);
-  }));
+  final locationCurrentAqiEntries = await Future.wait(
+    savedLocations.map((location) async {
+      final data = await aqiRepo.getCurrentAqi(location.lat, location.lng);
+      return MapEntry(location.id, data);
+    }),
+  );
+  final locationTrendEntries = await Future.wait(
+    savedLocations.map((location) async {
+      final data = await aqiRepo.getAqiTrends(location.lat, location.lng);
+      return MapEntry(location.id, data['week'] ?? const <AqiTrendDay>[]);
+    }),
+  );
 
   return exposureRepo.buildDashboard(
     currentAqi: currentAqi,
@@ -144,13 +166,16 @@ final exposureDashboardProvider =
   );
 });
 
-final userProfileProvider = StateNotifierProvider<UserProfileNotifier, UserProfile?>((ref) {
-  final auth = ref.watch(authRepositoryProvider);
-  return UserProfileNotifier(auth: auth);
-});
+final userProfileProvider =
+    StateNotifierProvider<UserProfileNotifier, UserProfile?>((ref) {
+      final auth = ref.watch(authRepositoryProvider);
+      return UserProfileNotifier(auth: auth);
+    });
 
 class UserProfileNotifier extends StateNotifier<UserProfile?> {
-  UserProfileNotifier({required AuthRepository auth}) : _auth = auth, super(_defaultGuest);
+  UserProfileNotifier({required AuthRepository auth})
+    : _auth = auth,
+      super(_defaultGuest);
 
   final AuthRepository _auth;
   static final _defaultGuest = UserProfile(
@@ -189,5 +214,23 @@ class UserProfileNotifier extends StateNotifier<UserProfile?> {
     final next = (state ?? _defaultGuest).copyWith(notificationPrefs: p);
     state = next;
     if (next.id != 'guest') _auth.updateProfile(next);
+  }
+
+  Future<void> initializeNotifications() async {
+    final notificationRepo = ref.read(notificationRepositoryProvider);
+    await notificationRepo.initialize();
+  }
+
+  Future<void> updateNotificationPreferences(
+    NotificationPreferences prefs,
+  ) async {
+    final notificationRepo = ref.read(notificationRepositoryProvider);
+    await notificationRepo.updatePreferences(prefs);
+    updateNotificationPrefs(prefs);
+  }
+
+  Future<void> initializeBackendProfile() async {
+    final backendRepo = ref.read(backendRepositoryProvider);
+    await backendRepo.initializeUserProfile();
   }
 }

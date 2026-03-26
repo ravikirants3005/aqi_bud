@@ -7,11 +7,13 @@ import '../../../data/models/user_models.dart';
 
 class PhoneOtpDialog extends StatefulWidget {
   final String verificationId;
+  final String phoneNumber;
   final Future<UserProfile?> Function(String otp) onVerify;
 
   const PhoneOtpDialog({
     super.key,
     required this.verificationId,
+    required this.phoneNumber,
     required this.onVerify,
   });
 

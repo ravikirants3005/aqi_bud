@@ -1,4 +1,4 @@
-/// Auth - Email+Password, Phone OTP, Google. Uses Firebase when configured, else local.
+/// Auth - Email+Password only. Uses Supabase when configured, else local.
 library;
 
 import 'dart:convert';
@@ -7,7 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
-import '../../core/firebase/firebase_service.dart';
+import '../../core/supabase/supabase_service.dart';
 import '../models/user_models.dart';
 
 class AuthRepository {
@@ -37,14 +37,13 @@ class AuthRepository {
       return AuthResult.failure('Password must be at least 6 characters');
     }
 
-    final firebaseResult = await registerWithFirebaseEmail(
+    final supabaseResult = await signUpWithEmail(
       email: email,
       password: password,
       displayName: displayName,
-      healthSensitivity: healthSensitivity,
     );
-    if (firebaseResult.isSuccess && firebaseResult.profile != null) {
-      final profile = firebaseResult.profile!;
+    if (supabaseResult.isSuccess && supabaseResult.profile != null) {
+      final profile = supabaseResult.profile!;
       await _persistProfile(profile);
       return AuthResult.success(profile);
     }
@@ -71,9 +70,9 @@ class AuthRepository {
 
   /// Sign in with email + password
   Future<AuthResult> signInWithEmail(String email, String password) async {
-    final firebaseResult = await signInWithFirebaseEmail(email, password);
-    if (firebaseResult.isSuccess && firebaseResult.profile != null) {
-      final profile = firebaseResult.profile!;
+    final supabaseResult = await signInWithEmail(email, password);
+    if (supabaseResult.isSuccess && supabaseResult.profile != null) {
+      final profile = supabaseResult.profile!;
       await _persistProfile(profile);
       return AuthResult.success(profile);
     }
@@ -97,40 +96,9 @@ class AuthRepository {
     return AuthResult.success(profile);
   }
 
-  /// Sign in with Google
-  Future<AuthResult> signInWithGoogleAuth() async {
-    final result = await signInWithGoogle();
-    if (result.isSuccess && result.profile != null) {
-      await _persistProfile(result.profile!);
-      return AuthResult.success(result.profile!);
-    }
-    return AuthResult.failure(result.error ?? 'Google sign in failed');
-  }
-
-  /// Sign in with Phone OTP - step 1: send OTP. Returns FirebaseAuthResult (needOtp or success/fail).
-  Future<FirebaseAuthResult> sendPhoneOtpAuth(String phoneNumber) async {
-    return sendPhoneOtp(phoneNumber);
-  }
-
-  /// Sign in with Phone OTP - step 2: verify OTP
-  Future<AuthResult> verifyPhoneOtpAuth({
-    required String verificationId,
-    required String otp,
-  }) async {
-    final result = await verifyPhoneOtp(
-      verificationId: verificationId,
-      otp: otp,
-    );
-    if (result.isSuccess && result.profile != null) {
-      await _persistProfile(result.profile!);
-      return AuthResult.success(result.profile!);
-    }
-    return AuthResult.failure(result.error ?? 'Verification failed');
-  }
-
   /// Sign out
   Future<void> signOut() async {
-    await signOutFirebase();
+    await signOutSupabase();
     final p = await _p;
     await p.setBool(_loggedInKey, false);
     await p.remove(_authKey);
@@ -138,23 +106,31 @@ class AuthRepository {
 
   /// Get current logged-in profile (or null if guest)
   Future<UserProfile?> getCurrentUser() async {
-    final fbUser = currentFirebaseUser;
-    if (fbUser != null) {
+    final supabaseUser = currentSupabaseUser;
+    if (supabaseUser != null) {
       final profile = UserProfile(
-        id: fbUser.uid,
-        email: fbUser.email,
-        phone: fbUser.phoneNumber,
-        displayName: fbUser.displayName ?? fbUser.email ?? 'User',
-        photoUrl: fbUser.photoURL,
+        id: supabaseUser.id,
+        email: supabaseUser.email,
+        phone: supabaseUser.phone,
+        displayName:
+            supabaseUser.userMetadata?['display_name'] ??
+            supabaseUser.email ??
+            'User',
+        photoUrl: supabaseUser.userMetadata?['avatar_url'],
         healthSensitivity: HealthSensitivity.normal,
       );
-      final existing = await _loadProfileFromStorage('auth_profile_${fbUser.email}');
+      final existing = await _loadProfileFromStorage(
+        'auth_profile_${supabaseUser.email}',
+      );
       if (existing != null) {
         return existing.copyWith(
-          id: fbUser.uid,
-          email: fbUser.email,
-          displayName: fbUser.displayName ?? existing.displayName,
-          photoUrl: fbUser.photoURL ?? existing.photoUrl,
+          id: supabaseUser.id,
+          email: supabaseUser.email,
+          displayName:
+              supabaseUser.userMetadata?['display_name'] ??
+              existing.displayName,
+          photoUrl:
+              supabaseUser.userMetadata?['avatar_url'] ?? existing.photoUrl,
         );
       }
       await _persistProfile(profile);
@@ -169,7 +145,10 @@ class AuthRepository {
     final p = await _p;
     await p.setString(_authKey, _profileToJson(profile));
     if (profile.email != null) {
-      await p.setString('auth_profile_${profile.email}', _profileToJson(profile));
+      await p.setString(
+        'auth_profile_${profile.email}',
+        _profileToJson(profile),
+      );
     }
     await p.setBool(_loggedInKey, true);
   }
@@ -184,14 +163,16 @@ class AuthRepository {
       'healthSensitivity': profile.healthSensitivity.name,
       'ageGroup': profile.ageGroup,
       'savedLocations': profile.savedLocations
-          .map((l) => {
-                'id': l.id,
-                'name': l.name,
-                'lat': l.lat,
-                'lng': l.lng,
-                'lastAqi': l.lastAqi,
-                'lastUpdated': l.lastUpdated?.toIso8601String(),
-              })
+          .map(
+            (l) => {
+              'id': l.id,
+              'name': l.name,
+              'lat': l.lat,
+              'lng': l.lng,
+              'lastAqi': l.lastAqi,
+              'lastUpdated': l.lastUpdated?.toIso8601String(),
+            },
+          )
           .toList(),
       'notificationPrefs': {
         'highAqiAlerts': profile.notificationPrefs.highAqiAlerts,
@@ -205,7 +186,9 @@ class AuthRepository {
 
   Future<void> _saveProfileToStorage(UserProfile profile) async {
     final p = await _p;
-    final key = profile.email != null ? 'auth_profile_${profile.email}' : _authKey;
+    final key = profile.email != null
+        ? 'auth_profile_${profile.email}'
+        : _authKey;
     await p.setString(key, _profileToJson(profile));
   }
 
@@ -216,12 +199,11 @@ class AuthRepository {
     try {
       final json = jsonDecode(raw) as Map<String, dynamic>;
       final sensRaw = json['healthSensitivity'] as String? ?? 'normal';
-      final sens = HealthSensitivity.values
-              .cast<HealthSensitivity?>()
-              .firstWhere(
-                (s) => s?.name == sensRaw,
-                orElse: () => HealthSensitivity.normal,
-              ) ??
+      final sens =
+          HealthSensitivity.values.cast<HealthSensitivity?>().firstWhere(
+            (s) => s?.name == sensRaw,
+            orElse: () => HealthSensitivity.normal,
+          ) ??
           HealthSensitivity.normal;
 
       final locsRaw = json['savedLocations'] as List<dynamic>? ?? [];
@@ -270,7 +252,10 @@ class AuthRepository {
     if (p.getBool(_loggedInKey) != true) return;
     await p.setString(_authKey, _profileToJson(profile));
     if (profile.email != null) {
-      await p.setString('auth_profile_${profile.email}', _profileToJson(profile));
+      await p.setString(
+        'auth_profile_${profile.email}',
+        _profileToJson(profile),
+      );
     }
   }
 
