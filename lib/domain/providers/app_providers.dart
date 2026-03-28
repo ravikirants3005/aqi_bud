@@ -1,12 +1,15 @@
 /// App providers - Riverpod
 library;
 
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../main.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/api/aqi_api.dart';
 import '../../data/models/aqi_models.dart';
@@ -19,6 +22,7 @@ import '../../data/repositories/health_tips_repository.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/suggestions_repository.dart';
 import '../../data/repositories/notification_repository.dart';
+import '../../core/services/simple_location_service.dart';
 import '../../data/repositories/backend_repository.dart';
 
 final sharedPrefsProvider = FutureProvider<SharedPreferences>(
@@ -62,49 +66,69 @@ final backendRepositoryProvider = Provider<BackendRepository>((ref) {
   return BackendRepository(config: config);
 });
 
-Future<bool> ensureLocationPermission({bool requestIfNeeded = false}) async {
-  final enabled = await Geolocator.isLocationServiceEnabled();
-  if (!enabled) return false;
+// Location providers
+final locationProvider = FutureProvider<Position?>((ref) async {
+  // Wait for permission check
+  final hasPermission = await ref.watch(locationPermissionProvider.future);
 
-  var permission = await Geolocator.checkPermission();
-  if (permission == LocationPermission.denied && requestIfNeeded) {
-    permission = await Geolocator.requestPermission();
+  if (!hasPermission) {
+    // If permission not granted, try requesting it via SimpleLocationService
+    final granted = await SimpleLocationService.requestLocationPermission();
+    if (!granted) return null;
+    // If granted, we continue to get location
   }
 
-  return permission == LocationPermission.whileInUse ||
-      permission == LocationPermission.always;
-}
+  // Try to get current location
+  final pos = await SimpleLocationService.getCurrentLocation();
+  if (pos != null) return pos;
 
-final locationProvider = FutureProvider<Position?>((_) async {
-  final hasPermission = await ensureLocationPermission();
-  if (!hasPermission) return null;
+  // Try to get last known as a secondary fallback if not already tried
+  return await Geolocator.getLastKnownPosition();
+});
 
-  Position? lastKnown;
-  try {
-    lastKnown = await Geolocator.getLastKnownPosition();
-  } catch (_) {
-    lastKnown = null;
-  }
-
-  try {
-    final current = await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        timeLimit: Duration(seconds: 15),
-      ),
-    );
-    if (lastKnown == null) return current;
-    return current.accuracy <= lastKnown.accuracy ? current : lastKnown;
-  } catch (_) {
-    return lastKnown;
-  }
+final locationPermissionProvider = FutureProvider<bool>((ref) async {
+  return await SimpleLocationService.hasLocationPermission();
 });
 
 final currentAqiProvider = FutureProvider<AqiData?>((ref) async {
   final pos = await ref.watch(locationProvider.future);
-  if (pos == null) return null;
+  if (pos == null) {
+    debugPrint('AQI PROVIDER: Position is null, cannot fetch AQI');
+    return null;
+  }
+
+  debugPrint(
+    'AQI PROVIDER: Fetching AQI for coords: ${pos.latitude}, ${pos.longitude}',
+  );
   final repo = ref.watch(aqiRepoProvider);
-  return repo.getCurrentAqi(pos.latitude, pos.longitude);
+  final data = await repo.getCurrentAqi(pos.latitude, pos.longitude);
+
+  if (data != null) {
+    debugPrint(
+      'AQI PROVIDER: Data fetched successfully for ${data.locationName}',
+    );
+  } else {
+    debugPrint('AQI PROVIDER: Failed to fetch AQI data');
+  }
+
+  return data;
+});
+
+// Backend AQI Providers
+final backendCurrentAqiProvider = FutureProvider<AqiData?>((ref) async {
+  final pos = await ref.watch(locationProvider.future);
+  if (pos == null) return null;
+  final backendRepo = ref.watch(backendRepositoryProvider);
+  return await backendRepo.getCurrentAQIBackend(pos.latitude, pos.longitude);
+});
+
+final backendAqiForecastProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
+  final pos = await ref.watch(locationProvider.future);
+  if (pos == null) return [];
+  final backendRepo = ref.watch(backendRepositoryProvider);
+  return await backendRepo.getAQIForecastBackend(pos.latitude, pos.longitude);
 });
 
 final aqiHourlyHistoryProvider = FutureProvider<List<AqiHourlyPoint>>((
@@ -169,15 +193,16 @@ final exposureDashboardProvider = FutureProvider<ExposureDashboardData?>((
 final userProfileProvider =
     StateNotifierProvider<UserProfileNotifier, UserProfile?>((ref) {
       final auth = ref.watch(authRepositoryProvider);
-      return UserProfileNotifier(auth: auth);
+      return UserProfileNotifier(auth: auth, ref: ref);
     });
 
 class UserProfileNotifier extends StateNotifier<UserProfile?> {
-  UserProfileNotifier({required AuthRepository auth})
+  UserProfileNotifier({required AuthRepository auth, required this.ref})
     : _auth = auth,
       super(_defaultGuest);
 
   final AuthRepository _auth;
+  final Ref ref;
   static final _defaultGuest = UserProfile(
     id: 'guest',
     displayName: 'Guest',

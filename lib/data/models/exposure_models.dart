@@ -21,6 +21,50 @@ class ExposureRecord extends Equatable {
     this.locationExposures = const [],
   });
 
+  ExposureRecord copyWith({
+    String? id,
+    DateTime? date,
+    double? score,
+    int? maxAqi,
+    Duration? outdoorMinutes,
+    List<LocationExposure>? locationExposures,
+  }) => ExposureRecord(
+    id: id ?? this.id,
+    date: date ?? this.date,
+    score: score ?? this.score,
+    maxAqi: maxAqi ?? this.maxAqi,
+    outdoorMinutes: outdoorMinutes ?? this.outdoorMinutes,
+    locationExposures: locationExposures ?? this.locationExposures,
+  );
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'date': date.toIso8601String(),
+      'score': score,
+      'maxAqi': maxAqi,
+      'outdoorMinutes': outdoorMinutes.inMinutes,
+      'locationExposures': locationExposures.map((l) => l.toJson()).toList(),
+    };
+  }
+
+  factory ExposureRecord.fromJson(Map<String, dynamic> json) {
+    final locationExposuresJson =
+        json['locationExposures'] as List<dynamic>? ?? [];
+    final locationExposures = locationExposuresJson
+        .map((l) => LocationExposure.fromJson(l as Map<String, dynamic>))
+        .toList();
+
+    return ExposureRecord(
+      id: json['id'] as String,
+      date: DateTime.parse(json['date'] as String),
+      score: (json['score'] as num).toDouble(),
+      maxAqi: json['maxAqi'] as int,
+      outdoorMinutes: Duration(minutes: json['outdoorMinutes'] as int? ?? 0),
+      locationExposures: locationExposures,
+    );
+  }
+
   @override
   List<Object?> get props => [id, date];
 }
@@ -39,6 +83,26 @@ class LocationExposure extends Equatable {
     required this.aqi,
     required this.duration,
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'lat': lat,
+      'lng': lng,
+      'name': name,
+      'aqi': aqi,
+      'duration': duration.inMinutes,
+    };
+  }
+
+  factory LocationExposure.fromJson(Map<String, dynamic> json) {
+    return LocationExposure(
+      lat: (json['lat'] as num).toDouble(),
+      lng: (json['lng'] as num).toDouble(),
+      name: json['name'] as String?,
+      aqi: json['aqi'] as int,
+      duration: Duration(minutes: json['duration'] as int),
+    );
+  }
 
   @override
   List<Object?> get props => [lat, lng, aqi];
@@ -79,8 +143,14 @@ class FrequentLocationInsight extends Equatable {
   });
 
   @override
-  List<Object?> get props =>
-      [locationId, name, currentAqi, weeklyAverageAqi, worstAqi, insight];
+  List<Object?> get props => [
+    locationId,
+    name,
+    currentAqi,
+    weeklyAverageAqi,
+    worstAqi,
+    insight,
+  ];
 }
 
 class ExposureDashboardData extends Equatable {
@@ -112,16 +182,16 @@ class ExposureDashboardData extends Equatable {
 
   @override
   List<Object?> get props => [
-        todayRecord,
-        weeklyExposure,
-        monthlyExposure,
-        highAqiDays,
-        bestDay,
-        worstDay,
-        locationInsights,
-        alerts,
-        suggestions,
-        monthlyPatternInsight,
-        safeLimit,
-      ];
+    todayRecord,
+    weeklyExposure,
+    monthlyExposure,
+    highAqiDays,
+    bestDay,
+    worstDay,
+    locationInsights,
+    alerts,
+    suggestions,
+    monthlyPatternInsight,
+    safeLimit,
+  ];
 }

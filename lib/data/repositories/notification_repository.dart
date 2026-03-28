@@ -9,12 +9,14 @@ import '../../core/notifications/notification_service.dart';
 import '../../data/models/user_models.dart';
 import '../../data/models/exposure_models.dart';
 import '../../data/models/aqi_models.dart';
+import '../../core/constants/app_constants.dart';
 
 class NotificationRepository {
   NotificationRepository({
     SharedPreferences? prefs,
     NotificationService? notificationService,
-  }) : _prefs = prefs, _notificationService = notificationService ?? NotificationService();
+  }) : _prefs = prefs,
+       _notificationService = notificationService ?? NotificationService();
 
   final SharedPreferences? _prefs;
   final NotificationService _notificationService;
@@ -23,7 +25,7 @@ class NotificationRepository {
   /// Initialize notification service and schedule recurring notifications
   Future<void> initialize() async {
     await _notificationService.initialize();
-    
+
     // Schedule recurring notifications if enabled
     if (await _isNotificationEnabled('daily_summary')) {
       await _notificationService.scheduleDailySummary();
@@ -36,9 +38,12 @@ class NotificationRepository {
   /// Update notification preferences and reschedule if needed
   Future<void> updatePreferences(NotificationPreferences prefs) async {
     final p = _prefs ?? await SharedPreferences.getInstance();
-    
+
     await p.setBool('${_prefsPrefix}high_aqi_alerts', prefs.highAqiAlerts);
-    await p.setBool('${_prefsPrefix}daily_exposure_summary', prefs.dailyExposureSummary);
+    await p.setBool(
+      '${_prefsPrefix}daily_exposure_summary',
+      prefs.dailyExposureSummary,
+    );
     await p.setBool('${_prefsPrefix}weekly_insights', prefs.weeklyInsights);
     await p.setBool('${_prefsPrefix}tip_of_day', prefs.tipOfDay);
 
@@ -48,7 +53,7 @@ class NotificationRepository {
     } else {
       await _notificationService.cancel(0); // Cancel daily summary
     }
-    
+
     if (prefs.weeklyInsights) {
       await _notificationService.scheduleWeeklyInsights();
     } else {
@@ -63,7 +68,7 @@ class NotificationRepository {
     required HealthSensitivity sensitivity,
   }) async {
     if (!await _isNotificationEnabled('high_aqi_alerts')) return;
-    
+
     await _notificationService.sendHighAqiAlert(
       aqi: aqi,
       location: location,
@@ -78,7 +83,7 @@ class NotificationRepository {
     required HealthSensitivity sensitivity,
   }) async {
     if (!await _isNotificationEnabled('daily_exposure_summary')) return;
-    
+
     await _notificationService.sendDailyExposureSummary(
       todayRecord: todayRecord,
       safeLimit: safeLimit,
@@ -93,7 +98,7 @@ class NotificationRepository {
     required HealthSensitivity sensitivity,
   }) async {
     if (!await _isNotificationEnabled('weekly_insights')) return;
-    
+
     await _notificationService.sendWeeklyInsights(
       weeklyExposure: weeklyExposure,
       highAqiDays: highAqiDays,
@@ -126,10 +131,11 @@ class NotificationRepository {
   /// Load notification preferences from storage
   Future<NotificationPreferences> loadPreferences() async {
     final p = _prefs ?? await SharedPreferences.getInstance();
-    
+
     return NotificationPreferences(
       highAqiAlerts: p.getBool('${_prefsPrefix}high_aqi_alerts') ?? true,
-      dailyExposureSummary: p.getBool('${_prefsPrefix}daily_exposure_summary') ?? true,
+      dailyExposureSummary:
+          p.getBool('${_prefsPrefix}daily_exposure_summary') ?? true,
       weeklyInsights: p.getBool('${_prefsPrefix}weekly_insights') ?? true,
       tipOfDay: p.getBool('${_prefsPrefix}tip_of_day') ?? false,
     );

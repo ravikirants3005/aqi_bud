@@ -3,17 +3,16 @@ library;
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/aqi_api.dart';
 import '../models/aqi_models.dart';
 
 class AqiRepository {
-  AqiRepository({
-    AqiApi? api,
-    SharedPreferences? prefs,
-  })  : _api = api ?? AqiApi(),
-        _prefs = prefs;
+  AqiRepository({AqiApi? api, SharedPreferences? prefs})
+    : _api = api ?? AqiApi(),
+      _prefs = prefs;
 
   final AqiApi _api;
   final SharedPreferences? _prefs;
@@ -37,9 +36,11 @@ class AqiRepository {
   Future<AqiData?> getCurrentAqi(double lat, double lng) async {
     final key = _locationKey(lat, lng);
     if (_shouldUseCurrentCache(key)) {
+      debugPrint('AQI REPO: Using memory cache for $key');
       return _memoryCurrentCache[key];
     }
 
+    debugPrint('AQI REPO: Fetching fresh data for $lat, $lng');
     final data = await _api.fetchCurrentAqi(lat, lng);
     if (data != null) {
       _memoryCurrentCache[key] = data;
@@ -48,6 +49,7 @@ class AqiRepository {
       return data;
     }
 
+    debugPrint('AQI REPO: API failed, checking persistent cache for $key');
     final cached = await _readCurrentFromPrefs(key);
     if (cached != null) {
       _memoryCurrentCache[key] = cached;
@@ -76,7 +78,8 @@ class AqiRepository {
     }
 
     final liveTrends = await _api.fetchAqiTrends(lat, lng);
-    final hasLiveData = (liveTrends['week']?.isNotEmpty ?? false) ||
+    final hasLiveData =
+        (liveTrends['week']?.isNotEmpty ?? false) ||
         (liveTrends['month']?.isNotEmpty ?? false);
     if (hasLiveData) {
       _memoryTrendCache[key] = liveTrends;
@@ -141,8 +144,7 @@ class AqiRepository {
       final max = values.reduce((a, b) => a > b ? a : b);
       final avg = (values.reduce((a, b) => a + b) / values.length).round();
       return AqiTrendDay(date: entry.key, maxAqi: max, avgAqi: avg);
-    }).toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
+    }).toList()..sort((a, b) => a.date.compareTo(b.date));
 
     final month = days.length > 30 ? days.sublist(days.length - 30) : days;
     final week = month.length > 7 ? month.sublist(month.length - 7) : month;
@@ -203,7 +205,8 @@ class AqiRepository {
     }
     final decoded = jsonDecode(raw) as Map<String, dynamic>;
     final timestamp =
-        DateTime.tryParse(decoded['timestamp'] as String? ?? '') ?? DateTime.now();
+        DateTime.tryParse(decoded['timestamp'] as String? ?? '') ??
+        DateTime.now();
     if (DateTime.now().difference(timestamp).inMilliseconds >
         _currentCacheIntervalMs) {
       return null;
@@ -227,13 +230,11 @@ class AqiRepository {
     await p.setString(
       '$_trendCachePrefix$key',
       jsonEncode({
-        'week': trends['week']
-                ?.map((day) => _encodeTrendDay(day))
-                .toList() ??
+        'week':
+            trends['week']?.map((day) => _encodeTrendDay(day)).toList() ??
             const [],
-        'month': trends['month']
-                ?.map((day) => _encodeTrendDay(day))
-                .toList() ??
+        'month':
+            trends['month']?.map((day) => _encodeTrendDay(day)).toList() ??
             const [],
       }),
     );
@@ -267,7 +268,9 @@ class AqiRepository {
     );
   }
 
-  Future<Map<String, List<AqiTrendDay>>?> _readTrendsFromPrefs(String key) async {
+  Future<Map<String, List<AqiTrendDay>>?> _readTrendsFromPrefs(
+    String key,
+  ) async {
     final p = _prefs ?? await SharedPreferences.getInstance();
     final raw = p.getString('$_trendCachePrefix$key');
     if (raw == null) {
@@ -312,7 +315,8 @@ class AqiRepository {
         .whereType<Map>()
         .map(
           (item) => AqiHourlyPoint(
-            time: DateTime.tryParse(item['time'] as String? ?? '') ??
+            time:
+                DateTime.tryParse(item['time'] as String? ?? '') ??
                 DateTime.now(),
             aqi: (item['aqi'] as num?)?.toInt() ?? 0,
           ),
@@ -322,10 +326,10 @@ class AqiRepository {
   }
 
   Map<String, dynamic> _encodeTrendDay(AqiTrendDay day) => {
-        'date': day.date.toIso8601String(),
-        'maxAqi': day.maxAqi,
-        'avgAqi': day.avgAqi,
-      };
+    'date': day.date.toIso8601String(),
+    'maxAqi': day.maxAqi,
+    'avgAqi': day.avgAqi,
+  };
 
   List<AqiTrendDay> _decodeTrendList(dynamic rawList) {
     if (rawList is! List) {
@@ -335,7 +339,8 @@ class AqiRepository {
         .whereType<Map>()
         .map(
           (item) => AqiTrendDay(
-            date: DateTime.tryParse(item['date'] as String? ?? '') ??
+            date:
+                DateTime.tryParse(item['date'] as String? ?? '') ??
                 DateTime.now(),
             maxAqi: (item['maxAqi'] as num?)?.toInt() ?? 0,
             avgAqi: (item['avgAqi'] as num?)?.toInt() ?? 0,

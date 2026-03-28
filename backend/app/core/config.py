@@ -3,8 +3,9 @@ Configuration settings for AQI Buddy Backend
 """
 
 import os
+import json
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Optional
 
 class Settings(BaseSettings):
     """Application settings"""

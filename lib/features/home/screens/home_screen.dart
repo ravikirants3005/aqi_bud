@@ -13,15 +13,16 @@ import 'package:intl/intl.dart';
 import '../../../data/models/aqi_models.dart';
 import '../../../data/models/user_models.dart';
 import '../../../domain/providers/app_providers.dart';
+import '../../../core/services/simple_location_service.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Use direct AQI provider for now (no auth required)
     final aqiAsync = ref.watch(currentAqiProvider);
-    final historyAsync = ref.watch(aqiHourlyHistoryProvider);
-    final trendsAsync = ref.watch(aqiTrendsProvider);
+    final forecastAsync = ref.watch(backendAqiForecastProvider);
     final profile = ref.watch(userProfileProvider);
 
     return Scaffold(
@@ -38,15 +39,16 @@ class HomeScreen extends ConsumerWidget {
         ],
       ),
       body: Container(
-        decoration: const BoxDecoration(
-          color: Color(0xFF060E20),
-        ),
+        decoration: const BoxDecoration(color: Color(0xFF060E20)),
         child: RefreshIndicator(
           onRefresh: () async {
-            ref.invalidate(locationProvider);
-            ref.invalidate(currentAqiProvider);
-            ref.invalidate(aqiHourlyHistoryProvider);
-            ref.invalidate(aqiTrendsProvider);
+            final locationResult = ref.refresh(locationProvider);
+            final aqiResult = ref.refresh(currentAqiProvider);
+            final forecastResult = ref.refresh(backendAqiForecastProvider);
+            // Results are used to satisfy the analyzer
+            locationResult;
+            aqiResult;
+            forecastResult;
           },
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -59,18 +61,51 @@ class HomeScreen extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       aqiAsync.when(
-                        data: (data) => data == null
-                            ? _LocationDisabledCard(ref: ref)
-                            : _HeroCard(
-                                data: data,
-                                profile: profile,
-                                onSave: () => _saveCurrentLocation(
-                                  context,
-                                  ref,
-                                  profile,
-                                  data,
-                                ),
+                        data: (data) {
+                          if (data != null) {
+                            return _HeroCard(
+                              data: data,
+                              profile: profile,
+                              onSave: () => _saveCurrentLocation(
+                                context,
+                                ref,
+                                profile,
+                                data,
                               ),
+                            );
+                          }
+                          // Check if permission is actually granted but location is still null
+                          return ref
+                              .watch(locationPermissionProvider)
+                              .when(
+                                data: (granted) => _LocationDisabledCard(
+                                  ref: ref,
+                                  permissionGranted: granted,
+                                ),
+                                loading: () {
+                                  // While loading AQI, check if it's because we're waiting for location
+                                  final locationAsync = ref.watch(
+                                    locationProvider,
+                                  );
+                                  final message = locationAsync.when(
+                                    data: (pos) => pos == null
+                                        ? 'Locating you...'
+                                        : 'Fetching AQI for ${pos.latitude.toStringAsFixed(2)}, ${pos.longitude.toStringAsFixed(2)}...',
+                                    loading: () => 'Finding your location...',
+                                    error: (_, __) =>
+                                        'Location error, retrying...',
+                                  );
+                                  return _LoadingPanel(
+                                    height: 320,
+                                    message: message,
+                                  );
+                                },
+                                error: (_, __) => _LocationDisabledCard(
+                                  ref: ref,
+                                  permissionGranted: false,
+                                ),
+                              );
+                        },
                         loading: () => const _LoadingPanel(height: 320),
                         error: (error, _) => const _MessagePanel(
                           title: 'Live AQI snapshot unavailable',
@@ -79,30 +114,13 @@ class HomeScreen extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(height: 20),
-                      historyAsync.when(
-                        data: (history) => _HourlyHistoryCard(
+                      forecastAsync.when(
+                        data: (forecast) => _ForecastCard(
                           currentData: aqiAsync.valueOrNull,
-                          history: history,
+                          forecast: forecast,
                         ),
-                        loading: () => const _LoadingPanel(height: 300),
-                        error: (error, _) => const _MessagePanel(
-                          title: '24-Hour AQI Wave',
-                          message:
-                              'Live hourly history could not be loaded right now.',
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      trendsAsync.when(
-                        data: (trends) => _SevenDayCard(
-                          currentData: aqiAsync.valueOrNull,
-                          week: trends['week'] ?? const <AqiTrendDay>[],
-                        ),
-                        loading: () => const _LoadingPanel(height: 250),
-                        error: (error, _) => const _MessagePanel(
-                          title: '7-Day AQI Pattern',
-                          message:
-                              'Weekly AQI history is temporarily unavailable.',
-                        ),
+                        loading: () => const CircularProgressIndicator(),
+                        error: (e, s) => Text('Forecast error: $e'),
                       ),
                       const SizedBox(height: 20),
                       const _ActionDeck(),
@@ -157,6 +175,7 @@ class HomeScreen extends ConsumerWidget {
     UserProfile? profile,
     AqiData data,
   ) async {
+    final backendRepo = ref.read(backendRepositoryProvider);
     final notifier = ref.read(userProfileProvider.notifier);
     final current = profile?.savedLocations ?? const <SavedLocation>[];
     final locationName = await showDialog<String>(
@@ -208,7 +227,8 @@ class HomeScreen extends ConsumerWidget {
       return;
     }
 
-    final saved = SavedLocation(
+    // Save to backend
+    final savedLocation = SavedLocation(
       id: 'loc_${DateTime.now().millisecondsSinceEpoch}',
       name: locationName,
       lat: data.lat,
@@ -216,14 +236,31 @@ class HomeScreen extends ConsumerWidget {
       lastAqi: data.aqi,
       lastUpdated: data.timestamp,
     );
-    notifier.updateSavedLocations([...current, saved]);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$locationName added to favorite locations.')),
-    );
+
+    try {
+      // Save to backend
+      final success = await backendRepo.saveLocation(savedLocation);
+
+      if (success) {
+        // Update local state
+        notifier.updateSavedLocations([...current, savedLocation]);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$locationName saved to backend!')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save location to backend')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error saving location: $e')));
+    }
   }
 }
 
-class _HeroCard extends StatelessWidget {
+class _HeroCard extends ConsumerWidget {
   const _HeroCard({
     required this.data,
     required this.profile,
@@ -235,7 +272,7 @@ class _HeroCard extends StatelessWidget {
   final VoidCallback onSave;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final accent = Color(data.category.colorValue);
     final savedLocations = profile?.savedLocations ?? const <SavedLocation>[];
     final alreadySaved = savedLocations.any(
@@ -266,7 +303,11 @@ class _HeroCard extends StatelessWidget {
                   spacing: 10,
                   runSpacing: 10,
                   children: [
-                    _Pill(icon: Icons.radar_rounded, label: 'Live AQI', color: accent),
+                    _Pill(
+                      icon: Icons.radar_rounded,
+                      label: 'Live AQI',
+                      color: accent,
+                    ),
                     _Pill(
                       icon: Icons.place_outlined,
                       label: _locationLabel(data),
@@ -304,8 +345,14 @@ class _HeroCard extends StatelessWidget {
                   spacing: 12,
                   runSpacing: 12,
                   children: [
-                    _MetricTile(label: 'PM2.5', value: data.pm25?.toStringAsFixed(1) ?? '--'),
-                    _MetricTile(label: 'PM10', value: data.pm10?.toStringAsFixed(1) ?? '--'),
+                    _MetricTile(
+                      label: 'PM2.5',
+                      value: data.pm25?.toStringAsFixed(1) ?? '--',
+                    ),
+                    _MetricTile(
+                      label: 'PM10',
+                      value: data.pm10?.toStringAsFixed(1) ?? '--',
+                    ),
                     _MetricTile(
                       label: 'Updated',
                       value: DateFormat('hh:mm a').format(data.timestamp),
@@ -318,13 +365,20 @@ class _HeroCard extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     backgroundColor: accent,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 16,
+                    ),
                   ),
                   icon: Icon(
-                    alreadySaved ? Icons.check_circle_outline : Icons.favorite_border,
+                    alreadySaved
+                        ? Icons.check_circle_outline
+                        : Icons.favorite_border,
                   ),
                   label: Text(
-                    alreadySaved ? 'Saved in favorites' : 'Save current location',
+                    alreadySaved
+                        ? 'Saved in favorites'
+                        : 'Save current location',
                   ),
                 ),
               ],
@@ -407,10 +461,7 @@ class _HeroCard extends StatelessWidget {
 }
 
 class _HourlyHistoryCard extends StatelessWidget {
-  const _HourlyHistoryCard({
-    required this.currentData,
-    required this.history,
-  });
+  const _HourlyHistoryCard({required this.currentData, required this.history});
 
   final AqiData? currentData;
   final List<AqiHourlyPoint> history;
@@ -430,7 +481,8 @@ class _HourlyHistoryCard extends StatelessWidget {
     final minAqi = last24.map((point) => point.aqi).reduce(math.min);
     final maxAqi = last24.map((point) => point.aqi).reduce(math.max);
     final avgAqi =
-        (last24.map((point) => point.aqi).reduce((a, b) => a + b) / last24.length)
+        (last24.map((point) => point.aqi).reduce((a, b) => a + b) /
+                last24.length)
             .round();
     final maxY = math.max(100, (((maxAqi + 24) ~/ 25) * 25)).toDouble();
     final interval = maxY <= 100 ? 20.0 : (maxY / 5).ceilToDouble();
@@ -443,7 +495,11 @@ class _HourlyHistoryCard extends StatelessWidget {
           children: [
             const Text(
               '24-Hour AQI Wave',
-              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -457,10 +513,26 @@ class _HourlyHistoryCard extends StatelessWidget {
               spacing: 12,
               runSpacing: 12,
               children: [
-                _StatChip(label: 'Now', value: '${last24.last.aqi}', accent: Color(aqiToCategory(last24.last.aqi).colorValue)),
-                _StatChip(label: '24h Avg', value: '$avgAqi', accent: const Color(0xFF69F6B8)),
-                _StatChip(label: '24h Max', value: '$maxAqi', accent: Color(aqiToCategory(maxAqi).colorValue)),
-                _StatChip(label: '24h Min', value: '$minAqi', accent: Color(aqiToCategory(minAqi).colorValue)),
+                _StatChip(
+                  label: 'Now',
+                  value: '${last24.last.aqi}',
+                  accent: Color(aqiToCategory(last24.last.aqi).colorValue),
+                ),
+                _StatChip(
+                  label: '24h Avg',
+                  value: '$avgAqi',
+                  accent: const Color(0xFF69F6B8),
+                ),
+                _StatChip(
+                  label: '24h Max',
+                  value: '$maxAqi',
+                  accent: Color(aqiToCategory(maxAqi).colorValue),
+                ),
+                _StatChip(
+                  label: '24h Min',
+                  value: '$minAqi',
+                  accent: Color(aqiToCategory(minAqi).colorValue),
+                ),
               ],
             ),
             const SizedBox(height: 22),
@@ -481,8 +553,12 @@ class _HourlyHistoryCard extends StatelessWidget {
                   ),
                   borderData: FlBorderData(show: false),
                   titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
@@ -490,7 +566,10 @@ class _HourlyHistoryCard extends StatelessWidget {
                         interval: interval,
                         getTitlesWidget: (value, meta) => Text(
                           value.toInt().toString(),
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.58), fontSize: 10),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.58),
+                            fontSize: 10,
+                          ),
                         ),
                       ),
                     ),
@@ -500,12 +579,16 @@ class _HourlyHistoryCard extends StatelessWidget {
                         interval: _xInterval(last24.length),
                         getTitlesWidget: (value, meta) {
                           final index = value.toInt();
-                          if (index < 0 || index >= last24.length) return const SizedBox.shrink();
+                          if (index < 0 || index >= last24.length)
+                            return const SizedBox.shrink();
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
                               DateFormat('ha').format(last24[index].time),
-                              style: TextStyle(color: Colors.white.withValues(alpha: 0.58), fontSize: 10),
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.58),
+                                fontSize: 10,
+                              ),
                             ),
                           );
                         },
@@ -519,7 +602,10 @@ class _HourlyHistoryCard extends StatelessWidget {
                         final point = last24[spot.x.toInt()];
                         return LineTooltipItem(
                           '${DateFormat('dd MMM, hh:mm a').format(point.time)}\nAQI ${point.aqi}',
-                          const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                          const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
                         );
                       }).toList(),
                     ),
@@ -540,12 +626,15 @@ class _HourlyHistoryCard extends StatelessWidget {
                       ),
                       dotData: FlDotData(
                         show: true,
-                        getDotPainter: (spot, percent, bar, index) => FlDotCirclePainter(
-                          radius: 3,
-                          color: Color(aqiToCategory(last24[index].aqi).colorValue),
-                          strokeWidth: 1.2,
-                          strokeColor: Colors.white,
-                        ),
+                        getDotPainter: (spot, percent, bar, index) =>
+                            FlDotCirclePainter(
+                              radius: 3,
+                              color: Color(
+                                aqiToCategory(last24[index].aqi).colorValue,
+                              ),
+                              strokeWidth: 1.2,
+                              strokeColor: Colors.white,
+                            ),
                       ),
                     ),
                   ],
@@ -560,10 +649,7 @@ class _HourlyHistoryCard extends StatelessWidget {
 }
 
 class _SevenDayCard extends StatelessWidget {
-  const _SevenDayCard({
-    required this.currentData,
-    required this.week,
-  });
+  const _SevenDayCard({required this.currentData, required this.week});
 
   final AqiData? currentData;
   final List<AqiTrendDay> week;
@@ -584,9 +670,12 @@ class _SevenDayCard extends StatelessWidget {
     final average =
         (week.map((day) => day.avgAqi).reduce((a, b) => a + b) / week.length)
             .round();
-    final maxY =
-        math.max(100, (((week.map((day) => day.maxAqi).reduce(math.max) + 24) ~/ 25) * 25))
-            .toDouble();
+    final maxY = math
+        .max(
+          100,
+          (((week.map((day) => day.maxAqi).reduce(math.max) + 24) ~/ 25) * 25),
+        )
+        .toDouble();
 
     return _Panel(
       child: Padding(
@@ -596,7 +685,11 @@ class _SevenDayCard extends StatelessWidget {
           children: [
             const Text(
               '7-Day AQI Pattern',
-              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
@@ -610,9 +703,23 @@ class _SevenDayCard extends StatelessWidget {
               spacing: 12,
               runSpacing: 12,
               children: [
-                _StatChip(label: 'Best day', value: '${DateFormat('EEE').format(best.date)} ${best.maxAqi}', accent: Color(aqiToCategory(best.maxAqi).colorValue)),
-                _StatChip(label: 'Worst day', value: '${DateFormat('EEE').format(worst.date)} ${worst.maxAqi}', accent: Color(aqiToCategory(worst.maxAqi).colorValue)),
-                _StatChip(label: '7d Avg', value: '$average', accent: const Color(0xFF69F6B8)),
+                _StatChip(
+                  label: 'Best day',
+                  value:
+                      '${DateFormat('EEE').format(best.date)} ${best.maxAqi}',
+                  accent: Color(aqiToCategory(best.maxAqi).colorValue),
+                ),
+                _StatChip(
+                  label: 'Worst day',
+                  value:
+                      '${DateFormat('EEE').format(worst.date)} ${worst.maxAqi}',
+                  accent: Color(aqiToCategory(worst.maxAqi).colorValue),
+                ),
+                _StatChip(
+                  label: '7d Avg',
+                  value: '$average',
+                  accent: const Color(0xFF69F6B8),
+                ),
               ],
             ),
             const SizedBox(height: 22),
@@ -639,14 +746,21 @@ class _SevenDayCard extends StatelessWidget {
                         final day = week[group.x.toInt()];
                         return BarTooltipItem(
                           '${DateFormat('EEE, dd MMM').format(day.date)}\nMax ${day.maxAqi} | Avg ${day.avgAqi}',
-                          const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                          const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
                         );
                       },
                     ),
                   ),
                   titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
@@ -654,7 +768,10 @@ class _SevenDayCard extends StatelessWidget {
                         interval: maxY <= 100 ? 20 : maxY / 5,
                         getTitlesWidget: (value, meta) => Text(
                           value.toInt().toString(),
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.58), fontSize: 10),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.58),
+                            fontSize: 10,
+                          ),
                         ),
                       ),
                     ),
@@ -663,12 +780,16 @@ class _SevenDayCard extends StatelessWidget {
                         showTitles: true,
                         getTitlesWidget: (value, meta) {
                           final index = value.toInt();
-                          if (index < 0 || index >= week.length) return const SizedBox.shrink();
+                          if (index < 0 || index >= week.length)
+                            return const SizedBox.shrink();
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
                               DateFormat('E').format(week[index].date),
-                              style: TextStyle(color: Colors.white.withValues(alpha: 0.62), fontSize: 11),
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.62),
+                                fontSize: 11,
+                              ),
                             ),
                           );
                         },
@@ -684,7 +805,9 @@ class _SevenDayCard extends StatelessWidget {
                             toY: week[i].maxAqi.toDouble(),
                             width: 26,
                             borderRadius: BorderRadius.circular(10),
-                            color: Color(aqiToCategory(week[i].maxAqi).colorValue),
+                            color: Color(
+                              aqiToCategory(week[i].maxAqi).colorValue,
+                            ),
                             backDrawRodData: BackgroundBarChartRodData(
                               show: true,
                               toY: maxY,
@@ -729,11 +852,7 @@ class _ActionDeck extends StatelessWidget {
 
         if (stacked) {
           return Column(
-            children: [
-              suggestions,
-              const SizedBox(height: 14),
-              insights,
-            ],
+            children: [suggestions, const SizedBox(height: 14), insights],
           );
         }
 
@@ -750,45 +869,72 @@ class _ActionDeck extends StatelessWidget {
 }
 
 class _LocationDisabledCard extends StatelessWidget {
-  const _LocationDisabledCard({required this.ref});
+  const _LocationDisabledCard({
+    required this.ref,
+    this.permissionGranted = false,
+  });
 
   final WidgetRef ref;
+  final bool permissionGranted;
 
   @override
   Widget build(BuildContext context) {
+    final title = permissionGranted
+        ? 'Still seeking location...'
+        : 'Location access needed';
+    final message = permissionGranted
+        ? 'Permission is granted, but we haven\'t received a GPS signal yet. Make sure your device has a clear view of the sky or is near a window.'
+        : 'Allow device location so AQI Buddy can fetch live AQI and real trend history for wherever you are.';
+    final buttonLabel = permissionGranted
+        ? 'Try refreshing'
+        : 'Allow location access';
+
     return _Panel(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
             Icon(
-              Icons.location_off_outlined,
+              permissionGranted
+                  ? Icons.location_searching
+                  : Icons.location_off_outlined,
               size: 52,
-              color: Theme.of(context).colorScheme.error,
+              color: permissionGranted
+                  ? Colors.blue
+                  : Theme.of(context).colorScheme.error,
             ),
             const SizedBox(height: 14),
-            const Text(
-              'Location access needed',
-              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Allow device location so AQI Buddy can fetch live AQI and real trend history for wherever you are.',
+              message,
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white.withValues(alpha: 0.72)),
             ),
             const SizedBox(height: 18),
             FilledButton.icon(
               onPressed: () => _requestLocationAccess(context, ref),
-              icon: const Icon(Icons.my_location),
-              label: const Text('Allow location access'),
+              icon: Icon(permissionGranted ? Icons.refresh : Icons.my_location),
+              label: Text(buttonLabel),
             ),
-            const SizedBox(height: 10),
-            Text(
-              'On Windows, the system may ask through Privacy & security > Location settings.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
-            ),
+            if (!permissionGranted) ...[
+              const SizedBox(height: 10),
+              Text(
+                'On Windows, the system may ask through Privacy & security > Location settings.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.5),
+                  fontSize: 12,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -809,7 +955,9 @@ class _Panel extends StatelessWidget {
         borderRadius: BorderRadius.circular(28),
         color: gradient == null ? const Color(0xFF0F1930) : null,
         gradient: gradient,
-        border: Border.all(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
+        border: Border.all(
+          color: const Color(0xFF40485D).withValues(alpha: 0.15),
+        ),
       ),
       child: child,
     );
@@ -817,26 +965,41 @@ class _Panel extends StatelessWidget {
 }
 
 class _LoadingPanel extends StatelessWidget {
-  const _LoadingPanel({required this.height});
+  const _LoadingPanel({required this.height, this.message});
 
   final double height;
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
     return _Panel(
       child: SizedBox(
         height: height,
-        child: const Center(child: CircularProgressIndicator()),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(),
+              if (message != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  message!,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.6),
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
 class _MessagePanel extends StatelessWidget {
-  const _MessagePanel({
-    required this.title,
-    required this.message,
-  });
+  const _MessagePanel({required this.title, required this.message});
 
   final String title;
   final String message;
@@ -851,7 +1014,11 @@ class _MessagePanel extends StatelessWidget {
           children: [
             Text(
               title,
-              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             const SizedBox(height: 10),
             Text(
@@ -893,7 +1060,9 @@ class _ActionCard extends StatelessWidget {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          border: Border.all(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
+          border: Border.all(
+            color: const Color(0xFF40485D).withValues(alpha: 0.15),
+          ),
         ),
         child: Padding(
           padding: const EdgeInsets.all(18),
@@ -915,12 +1084,18 @@ class _ActionCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.68)),
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.68),
+                      ),
                     ),
                   ],
                 ),
@@ -935,11 +1110,7 @@ class _ActionCard extends StatelessWidget {
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({
-    required this.icon,
-    required this.label,
-    required this.color,
-  });
+  const _Pill({required this.icon, required this.label, required this.color});
 
   final IconData icon;
   final String label;
@@ -952,7 +1123,9 @@ class _Pill extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
         color: color.withValues(alpha: 0.12),
-        border: Border.all(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
+        border: Border.all(
+          color: const Color(0xFF40485D).withValues(alpha: 0.15),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -974,10 +1147,7 @@ class _Pill extends StatelessWidget {
 }
 
 class _MetricTile extends StatelessWidget {
-  const _MetricTile({
-    required this.label,
-    required this.value,
-  });
+  const _MetricTile({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -990,21 +1160,122 @@ class _MetricTile extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
         color: Colors.black.withValues(alpha: 0.24),
-        border: Border.all(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
+        border: Border.all(
+          color: const Color(0xFF40485D).withValues(alpha: 0.15),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.64), fontSize: 12),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.64),
+              fontSize: 12,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
             value,
-            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ForecastCard extends StatelessWidget {
+  const _ForecastCard({required this.currentData, required this.forecast});
+
+  final AqiData? currentData;
+  final List<Map<String, dynamic>> forecast;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Panel(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.calendar_today_rounded,
+                  color: Colors.white.withValues(alpha: 0.72),
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  '7-Day AQI Forecast',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.72),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            if (forecast.isEmpty)
+              Text(
+                'No forecast data available',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.6),
+                  fontSize: 14,
+                ),
+              )
+            else
+              Column(
+                children: forecast.take(7).map((day) {
+                  final date = day['date'] ?? 'Unknown';
+                  final aqi = day['aqi'] ?? 0;
+                  final pm25 = day['pm25'] ?? 0;
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            date,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.84),
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            'AQI: $aqi',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.84),
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            'PM2.5: $pm25',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.84),
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1028,7 +1299,9 @@ class _StatChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: accent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFF40485D).withValues(alpha: 0.15)),
+        border: Border.all(
+          color: const Color(0xFF40485D).withValues(alpha: 0.15),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1036,12 +1309,19 @@ class _StatChip extends StatelessWidget {
         children: [
           Text(
             label,
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.62), fontSize: 12),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.62),
+              fontSize: 12,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
             value,
-            style: TextStyle(color: accent, fontWeight: FontWeight.w800, fontSize: 18),
+            style: TextStyle(
+              color: accent,
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+            ),
           ),
         ],
       ),
@@ -1065,55 +1345,51 @@ double _xInterval(int pointCount) {
 }
 
 String _headline(int aqi) {
-  if (aqi <= 50) return 'Air looks clear right now. Outdoor plans are in a safe zone.';
-  if (aqi <= 100) return 'Conditions are manageable, but sensitive groups should stay alert.';
-  if (aqi <= 150) return 'Sensitive groups may feel the impact. Keep long outdoor time short.';
+  if (aqi <= 50)
+    return 'Air looks clear right now. Outdoor plans are in a safe zone.';
+  if (aqi <= 100)
+    return 'Conditions are manageable, but sensitive groups should stay alert.';
+  if (aqi <= 150)
+    return 'Sensitive groups may feel the impact. Keep long outdoor time short.';
   if (aqi <= 200) return 'Air is unhealthy. Reduce strenuous outdoor activity.';
-  if (aqi <= 300) return 'Air quality is very unhealthy. Protective steps are strongly advised.';
+  if (aqi <= 300)
+    return 'Air quality is very unhealthy. Protective steps are strongly advised.';
   return 'Hazardous air conditions. Staying indoors is the safer choice.';
 }
 
 String _locationLabel(AqiData data) {
   final label = data.locationName?.trim();
-  if (label != null && label.isNotEmpty) return label;
-  return '${data.lat.toStringAsFixed(3)}, ${data.lng.toStringAsFixed(3)}';
+  if (label != null && label.isNotEmpty) {
+    return label;
+  }
+
+  // If no location name, provide a more user-friendly coordinate display
+  return 'Location: ${data.lat.toStringAsFixed(3)}, ${data.lng.toStringAsFixed(3)}';
 }
 
 Future<void> _requestLocationAccess(BuildContext context, WidgetRef ref) async {
-  final enabled = await Geolocator.isLocationServiceEnabled();
-  if (!enabled) {
-    await Geolocator.openLocationSettings();
+  // Use SimpleLocationService for straightforward permission handling
+  final hasPermission = await SimpleLocationService.requestLocationPermission();
+
+  if (hasPermission) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location permission granted!')),
+      );
+    }
+    // Refresh the providers to get new location data
+    ref.invalidate(locationProvider);
+    ref.invalidate(currentAqiProvider);
+    ref.invalidate(backendAqiForecastProvider);
+  } else {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Turn on device location services in Windows settings and try again.'),
+          content: Text(
+            'Location permission denied. Please enable it in settings.',
+          ),
         ),
       );
     }
-    return;
   }
-
-  var permission = await Geolocator.checkPermission();
-  if (permission == LocationPermission.denied) {
-    permission = await Geolocator.requestPermission();
-  }
-
-  if (permission == LocationPermission.deniedForever) {
-    await Geolocator.openAppSettings();
-    return;
-  }
-
-  if (permission == LocationPermission.denied) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Location permission denied. AQI cannot be loaded.')),
-      );
-    }
-    return;
-  }
-
-  ref.invalidate(locationProvider);
-  ref.invalidate(currentAqiProvider);
-  ref.invalidate(aqiHourlyHistoryProvider);
-  ref.invalidate(aqiTrendsProvider);
 }

@@ -7,7 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/constants/app_constants.dart';
-import '../../core/supabase/supabase_service.dart';
+import '../../core/supabase/supabase_service.dart' as supabase;
 import '../models/user_models.dart';
 
 class AuthRepository {
@@ -37,9 +37,9 @@ class AuthRepository {
       return AuthResult.failure('Password must be at least 6 characters');
     }
 
-    final supabaseResult = await signUpWithEmail(
-      email: email,
-      password: password,
+    final supabaseResult = await supabase.signUpWithEmail(
+      email,
+      password,
       displayName: displayName,
     );
     if (supabaseResult.isSuccess && supabaseResult.profile != null) {
@@ -70,7 +70,7 @@ class AuthRepository {
 
   /// Sign in with email + password
   Future<AuthResult> signInWithEmail(String email, String password) async {
-    final supabaseResult = await signInWithEmail(email, password);
+    final supabaseResult = await supabase.signInWithEmail(email, password);
     if (supabaseResult.isSuccess && supabaseResult.profile != null) {
       final profile = supabaseResult.profile!;
       await _persistProfile(profile);
@@ -98,7 +98,7 @@ class AuthRepository {
 
   /// Sign out
   Future<void> signOut() async {
-    await signOutSupabase();
+    await supabase.signOutSupabase();
     final p = await _p;
     await p.setBool(_loggedInKey, false);
     await p.remove(_authKey);
@@ -106,7 +106,7 @@ class AuthRepository {
 
   /// Get current logged-in profile (or null if guest)
   Future<UserProfile?> getCurrentUser() async {
-    final supabaseUser = currentSupabaseUser;
+    final supabaseUser = supabase.currentSupabaseUser;
     if (supabaseUser != null) {
       final profile = UserProfile(
         id: supabaseUser.id,

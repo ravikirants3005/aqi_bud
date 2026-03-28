@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../router/app_router.dart';
+import '../services/simple_location_service.dart';
 import '../../domain/providers/app_providers.dart';
 
 class AuthLoader extends ConsumerStatefulWidget {
@@ -28,9 +29,16 @@ class _AuthLoaderState extends ConsumerState<AuthLoader> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_loadAuth());
-      unawaited(_initializeLocationFlow());
+      _runInitialFlow();
     });
+  }
+
+  Future<void> _runInitialFlow() async {
+    // 1. Load auth first
+    await _loadAuth();
+
+    // 2. Then ensure location permission and fetch location
+    await _initializeLocationFlow();
   }
 
   @override
@@ -113,7 +121,8 @@ class _AuthLoaderState extends ConsumerState<AuthLoader> {
 
     if (!mounted) return false;
 
-    final granted = servicesNowEnabled &&
+    final granted =
+        servicesNowEnabled &&
         (updatedPermission == LocationPermission.whileInUse ||
             updatedPermission == LocationPermission.always);
     if (!granted) {
@@ -132,14 +141,15 @@ class _AuthLoaderState extends ConsumerState<AuthLoader> {
   }
 
   Future<void> _bootstrapLocation() async {
-    final granted = await ensureLocationPermission();
-    if (!mounted || !granted) return;
+    final position = await SimpleLocationService.getCurrentLocation();
+    if (!mounted || position == null) return;
+
     _refreshLocationDrivenData();
   }
 
   Future<void> _startLocationTracking() async {
-    final granted = await ensureLocationPermission();
-    if (!mounted || !granted) return;
+    final position = await SimpleLocationService.getCurrentLocation();
+    if (!mounted || position == null) return;
     _locationPollTimer?.cancel();
     await _pollLocationAndRefresh(forceRefresh: true);
     _locationPollTimer = Timer.periodic(
@@ -148,19 +158,11 @@ class _AuthLoaderState extends ConsumerState<AuthLoader> {
     );
   }
 
-  Future<void> _pollLocationAndRefresh({
-    bool forceRefresh = false,
-  }) async {
-    final granted = await ensureLocationPermission();
-    if (!mounted || !granted) return;
+  Future<void> _pollLocationAndRefresh({bool forceRefresh = false}) async {
+    final position = await SimpleLocationService.getCurrentLocation();
+    if (!mounted || position == null) return;
 
     try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 15),
-        ),
-      );
       if (!mounted) return;
 
       final nextKey =

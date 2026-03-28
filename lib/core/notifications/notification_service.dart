@@ -5,20 +5,21 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
 
-import '../../data/models/user_models.dart';
-import '../../data/models/aqi_models.dart';
 import '../../data/models/exposure_models.dart';
+import '../../core/constants/app_constants.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
   NotificationService._internal();
 
-  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
   bool _initialized = false;
 
   Future<void> initialize() async {
@@ -26,7 +27,9 @@ class NotificationService {
 
     tz.initializeTimeZones();
 
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
@@ -50,16 +53,23 @@ class NotificationService {
   Future<void> _requestPermissions() async {
     if (Platform.isAndroid) {
       await _notifications
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
           ?.requestNotificationsPermission();
+
+      // Request exact alarm permission for Android 12+
+      await _notifications
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.requestExactAlarmsPermission();
     } else if (Platform.isIOS) {
       await _notifications
-          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
-          ?.requestPermissions(
-            alert: true,
-            badge: true,
-            sound: true,
-          );
+          .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin
+          >()
+          ?.requestPermissions(alert: true, badge: true, sound: true);
     }
   }
 
@@ -78,7 +88,7 @@ class NotificationService {
 
     final category = _getAqiCategory(aqi);
     final severity = _getNotificationSeverity(aqi, sensitivity);
-    
+
     await _notifications.show(
       DateTime.now().millisecondsSinceEpoch.remainder(100000),
       'High AQI Alert',
@@ -149,8 +159,9 @@ class NotificationService {
 
     final averageScore = weeklyExposure.isEmpty
         ? 0
-        : weeklyExposure.map((r) => r.score).reduce((a, b) => a + b) / weeklyExposure.length;
-    
+        : weeklyExposure.map((r) => r.score).reduce((a, b) => a + b) /
+              weeklyExposure.length;
+
     final message = highAqiDays > 2
         ? 'You had $highAqiDays high AQI days this week. Consider reducing outdoor time next week.'
         : 'Weekly average exposure: ${averageScore.toInt()}. ${highAqiDays == 0 ? 'Great job avoiding high pollution!' : 'Try to minimize high AQI exposure.'}';
@@ -181,54 +192,110 @@ class NotificationService {
   Future<void> scheduleDailySummary() async {
     if (!_initialized) await initialize();
 
-    await _notifications.zonedSchedule(
-      0,
-      'Daily Exposure Summary',
-      'Check your daily air quality exposure summary',
-      _nextInstanceOfTime(20, 0), // 8 PM
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'daily_summary_channel',
-          'Daily Exposure Summary',
-          channelDescription: 'Daily air quality exposure reports',
+    try {
+      await _notifications.zonedSchedule(
+        0,
+        'Daily Exposure Summary',
+        'Check your daily air quality exposure summary',
+        _nextInstanceOfTime(20, 0), // 8 PM
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'daily_summary_channel',
+            'Daily Exposure Summary',
+            channelDescription: 'Daily air quality exposure reports',
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: false,
+          ),
         ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: false,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.time,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      );
+    } catch (e) {
+      // Fallback to inexact scheduling if exact alarms aren't permitted
+      await _notifications.zonedSchedule(
+        0,
+        'Daily Exposure Summary',
+        'Check your daily air quality exposure summary',
+        _nextInstanceOfTime(20, 0), // 8 PM
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'daily_summary_channel',
+            'Daily Exposure Summary',
+            channelDescription: 'Daily air quality exposure reports',
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: false,
+          ),
         ),
-      ),
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      matchDateTimeComponents: DateTimeComponents.time,
-    );
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.time,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      );
+    }
   }
 
   /// Schedule weekly insights on Sunday at 9 AM
   Future<void> scheduleWeeklyInsights() async {
     if (!_initialized) await initialize();
 
-    await _notifications.zonedSchedule(
-      1,
-      'Weekly Air Quality Insights',
-      'Review your weekly air quality patterns and recommendations',
-      _nextInstanceOfDayTime(DateTime.sunday, 9, 0),
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'weekly_insights_channel',
-          'Weekly Insights',
-          channelDescription: 'Weekly air quality patterns and recommendations',
+    try {
+      await _notifications.zonedSchedule(
+        1,
+        'Weekly Air Quality Insights',
+        'Review your weekly air quality patterns and recommendations',
+        _nextInstanceOfDayTime(DateTime.sunday, 9, 0),
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'weekly_insights_channel',
+            'Weekly Insights',
+            channelDescription:
+                'Weekly air quality patterns and recommendations',
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: false,
+          ),
         ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: false,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      );
+    } catch (e) {
+      // Fallback to inexact scheduling if exact alarms aren't permitted
+      await _notifications.zonedSchedule(
+        1,
+        'Weekly Air Quality Insights',
+        'Review your weekly air quality patterns and recommendations',
+        _nextInstanceOfDayTime(DateTime.sunday, 9, 0),
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'weekly_insights_channel',
+            'Weekly Insights',
+            channelDescription:
+                'Weekly air quality patterns and recommendations',
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: false,
+          ),
         ),
-      ),
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
-      matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
-    );
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      );
+    }
   }
 
   tz.TZDateTime _nextInstanceOfTime(int hour, int minute) {
@@ -265,7 +332,10 @@ class NotificationService {
     return 'Hazardous';
   }
 
-  _NotificationSeverity _getNotificationSeverity(int aqi, HealthSensitivity sensitivity) {
+  _NotificationSeverity _getNotificationSeverity(
+    int aqi,
+    HealthSensitivity sensitivity,
+  ) {
     final threshold = switch (sensitivity) {
       HealthSensitivity.normal => 150,
       HealthSensitivity.sensitive => 100,
@@ -276,7 +346,10 @@ class NotificationService {
     if (aqi >= threshold + 50) {
       return _NotificationSeverity(Importance.high, Priority.high);
     } else if (aqi >= threshold) {
-      return _NotificationSeverity(Importance.defaultImportance, Priority.defaultPriority);
+      return _NotificationSeverity(
+        Importance.defaultImportance,
+        Priority.defaultPriority,
+      );
     }
     return _NotificationSeverity(Importance.low, Priority.low);
   }
@@ -285,7 +358,8 @@ class NotificationService {
     if (aqi >= 200) return 'Avoid all outdoor activities.';
     if (aqi >= 150) return 'Avoid prolonged outdoor exertion.';
     if (aqi >= 100) return 'Limit prolonged outdoor exertion.';
-    if (aqi >= 50) return 'Unusually sensitive people should consider reducing prolonged outdoor exertion.';
+    if (aqi >= 50)
+      return 'Unusually sensitive people should consider reducing prolonged outdoor exertion.';
     return 'Air quality is satisfactory.';
   }
 
@@ -300,6 +374,10 @@ class NotificationService {
 
   Future<void> cancelAll() async {
     await _notifications.cancelAll();
+  }
+
+  Future<void> cancel(int id) async {
+    await _notifications.cancel(id);
   }
 }
 

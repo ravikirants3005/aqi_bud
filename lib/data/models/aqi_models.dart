@@ -77,6 +77,30 @@ class AqiData extends Equatable {
     this.locationName,
   });
 
+  Map<String, dynamic> toJson() {
+    return {
+      'aqi': aqi,
+      'lat': lat,
+      'lng': lng,
+      'timestamp': timestamp.toIso8601String(),
+      'pm25': pm25,
+      'pm10': pm10,
+      'locationName': locationName,
+    };
+  }
+
+  factory AqiData.fromJson(Map<String, dynamic> json) {
+    return AqiData(
+      aqi: json['aqi'] as int,
+      lat: (json['lat'] as num).toDouble(),
+      lng: (json['lng'] as num).toDouble(),
+      timestamp: DateTime.parse(json['timestamp'] as String),
+      pm25: (json['pm25'] as num?)?.toDouble(),
+      pm10: (json['pm10'] as num?)?.toDouble(),
+      locationName: json['locationName'] as String?,
+    );
+  }
+
   AqiCategory get category => aqiToCategory(aqi);
 
   @override
@@ -105,10 +129,7 @@ class AqiHourlyPoint extends Equatable {
   final DateTime time;
   final int aqi;
 
-  const AqiHourlyPoint({
-    required this.time,
-    required this.aqi,
-  });
+  const AqiHourlyPoint({required this.time, required this.aqi});
 
   AqiCategory get category => aqiToCategory(aqi);
 

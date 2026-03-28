@@ -9,7 +9,12 @@
 //
 // Until you add real credentials, the app will run using local auth fallback.
 
-import 'package:supabase_flutter/supabase_flutter.dart' show SupabaseOptions;
+class SupabaseOptions {
+  final String url;
+  final String anonKey;
+
+  const SupabaseOptions({required this.url, required this.anonKey});
+}
 
 class DefaultSupabaseOptions {
   static SupabaseOptions get currentPlatform {

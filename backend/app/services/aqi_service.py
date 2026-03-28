@@ -63,8 +63,8 @@ class AQIService:
         params = {
             "latitude": lat,
             "longitude": lng,
-            "forecast_days": days,
-            "hourly": "pm10,pm2_5,us_aqi"
+            "hourly": "pm10,pm2_5,us_aqi",
+            "forecast_hours": days * 24  # Convert days to hours
         }
         
         async with aiohttp.ClientSession() as session:

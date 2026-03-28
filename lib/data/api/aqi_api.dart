@@ -3,10 +3,12 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
-import 'package:geocoding/geocoding.dart';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:geocoding/geocoding.dart';
 
 import '../../core/config/runtime_config.dart';
 import '../models/aqi_models.dart';
@@ -22,13 +24,13 @@ class AqiApi {
   final RuntimeConfig _config;
 
   Map<String, String> get _openAqHeaders => {
-        if (_config.aqiApiKey.isNotEmpty) 'X-API-Key': _config.aqiApiKey,
-      };
+    if (_config.aqiApiKey.isNotEmpty) 'X-API-Key': _config.aqiApiKey,
+  };
   Map<String, String> get _reverseGeocodeHeaders => const {
-        'User-Agent': 'AQIBuddy/1.0 (device-location reverse geocoding)',
-        'Accept': 'application/json',
-        'Accept-Language': 'en',
-      };
+    'User-Agent': 'AQIBuddy/1.0 (device-location reverse geocoding)',
+    'Accept': 'application/json',
+    'Accept-Language': 'en',
+  };
 
   Future<AqiData?> fetchCurrentAqi(double lat, double lng) async {
     if (_config.aqiProvider == 'openaq' && _config.aqiApiKey.isNotEmpty) {
@@ -113,10 +115,7 @@ class AqiApi {
         final aqi = _toInt(aqiList, i);
         if (timestamp == null || aqi == null) continue;
         points.add(
-          AqiHourlyPoint(
-            time: timestamp,
-            aqi: aqi.clamp(0, 500).toInt(),
-          ),
+          AqiHourlyPoint(time: timestamp, aqi: aqi.clamp(0, 500).toInt()),
         );
       }
 
@@ -144,11 +143,27 @@ class AqiApi {
   Future<AqiData?> _fetchCurrentAqiFromOpenAq(double lat, double lng) async {
     try {
       final candidates = await _fetchNearbyOpenAqLocations(lat, lng);
+      if (candidates.isEmpty) {
+        debugPrint('OPENAQ: No nearby locations found for $lat, $lng');
+        return null;
+      }
 
       for (final candidate in candidates) {
         final loc = candidate.data;
+        final distance = candidate.distance;
         final locationId = loc['id'] as int?;
         if (locationId == null) continue;
+
+        debugPrint(
+          'OPENAQ: Trying station ${loc['name']} at distance ${distance?.toStringAsFixed(1)}km',
+        );
+
+        // Extract location name from OpenAQ metadata if available
+        String? openAqLocationName = loc['name'] as String?;
+        final locality = loc['locality'] as String?;
+        if (locality != null && locality.isNotEmpty) {
+          openAqLocationName = locality;
+        }
 
         final sensorsList = loc['sensors'] as List<dynamic>? ?? [];
         final sensorIdToParam = <int, String>{};
@@ -162,7 +177,9 @@ class AqiApi {
           }
         }
 
-        final latestUri = Uri.parse('$_openAqBaseUrl/locations/$locationId/latest');
+        final latestUri = Uri.parse(
+          '$_openAqBaseUrl/locations/$locationId/latest',
+        );
         final latestResp = await http
             .get(latestUri, headers: _openAqHeaders)
             .timeout(const Duration(seconds: 10));
@@ -176,7 +193,9 @@ class AqiApi {
         for (final r in results) {
           final row = r as Map<String, dynamic>;
           final sensorsId = row['sensorsId'] as int?;
-          final paramName = sensorsId != null ? sensorIdToParam[sensorsId] : null;
+          final paramName = sensorsId != null
+              ? sensorIdToParam[sensorsId]
+              : null;
           final value = _toDouble(row['value']);
           if (paramName == 'pm25' && value != null) pm25 = value;
           if (paramName == 'pm10' && value != null) pm10 = value;
@@ -194,7 +213,11 @@ class AqiApi {
           timestamp: DateTime.now(),
           pm25: pm25,
           pm10: pm10,
-          locationName: await _resolveLocationName(lat, lng),
+          locationName: await _resolveLocationName(
+            lat,
+            lng,
+            fallbackName: openAqLocationName,
+          ),
         );
       }
     } catch (_) {
@@ -205,11 +228,9 @@ class AqiApi {
 
   Future<List<AqiHourlyPoint>> _fetchAqiHistoryFromOpenAq(
     double lat,
-    double lng,
-    {
+    double lng, {
     required int days,
-    }
-  ) async {
+  }) async {
     try {
       final candidates = await _fetchNearbyOpenAqLocations(lat, lng);
       final today = DateTime.now();
@@ -255,19 +276,21 @@ class AqiApi {
         }
         for (final entry in pm10Hours.entries) {
           final existing = merged[entry.key];
-          merged[entry.key] =
-              existing == null ? entry.value : (existing > entry.value ? existing : entry.value);
+          merged[entry.key] = existing == null
+              ? entry.value
+              : (existing > entry.value ? existing : entry.value);
         }
 
-        final history = merged.entries
-            .map(
-              (entry) => AqiHourlyPoint(
-                time: entry.key,
-                aqi: entry.value.clamp(0, 500).toInt(),
-              ),
-            )
-            .toList()
-          ..sort((a, b) => a.time.compareTo(b.time));
+        final history =
+            merged.entries
+                .map(
+                  (entry) => AqiHourlyPoint(
+                    time: entry.key,
+                    aqi: entry.value.clamp(0, 500).toInt(),
+                  ),
+                )
+                .toList()
+              ..sort((a, b) => a.time.compareTo(b.time));
 
         if (history.length > bestHistory.length) {
           bestHistory = history;
@@ -284,12 +307,9 @@ class AqiApi {
   }
 
   Future<List<({Map<String, dynamic> data, double? distance})>>
-      _fetchNearbyOpenAqLocations(
-    double lat,
-    double lng,
-  ) async {
+  _fetchNearbyOpenAqLocations(double lat, double lng) async {
     final locationsUri = Uri.parse(
-      '$_openAqBaseUrl/locations?coordinates=$lat,$lng&radius=20000&limit=10',
+      '$_openAqBaseUrl/locations?coordinates=$lat,$lng&radius=10000&limit=5',
     );
     final locResp = await http
         .get(locationsUri, headers: _openAqHeaders)
@@ -300,19 +320,22 @@ class AqiApi {
     final locResults = locJson['results'] as List<dynamic>?;
     if (locResults == null || locResults.isEmpty) return [];
 
-    final candidates = locResults
-        .whereType<Map<String, dynamic>>()
-        .map((location) => (
-              data: location,
-              distance: _distanceFromUser(
-                userLat: lat,
-                userLng: lng,
-                location: location,
+    final candidates =
+        locResults
+            .whereType<Map<String, dynamic>>()
+            .map(
+              (location) => (
+                data: location,
+                distance: _distanceFromUser(
+                  userLat: lat,
+                  userLng: lng,
+                  location: location,
+                ),
               ),
-            ))
-        .where((candidate) => candidate.distance != null)
-        .toList()
-      ..sort((a, b) => a.distance!.compareTo(b.distance!));
+            )
+            .where((candidate) => candidate.distance != null)
+            .toList()
+          ..sort((a, b) => a.distance!.compareTo(b.distance!));
 
     return candidates;
   }
@@ -323,8 +346,7 @@ class AqiApi {
     required String from,
     required String to,
   }) async {
-    final uri = Uri.parse('$_openAqBaseUrl/sensors/$sensorId/hours')
-        .replace(
+    final uri = Uri.parse('$_openAqBaseUrl/sensors/$sensorId/hours').replace(
       queryParameters: {
         'datetime_from': from,
         'datetime_to': to,
@@ -349,13 +371,17 @@ class AqiApi {
       if (avgAqi == null) continue;
 
       final existing = output[time];
-      output[time] = existing == null ? avgAqi : (existing > avgAqi ? existing : avgAqi);
+      output[time] = existing == null
+          ? avgAqi
+          : (existing > avgAqi ? existing : avgAqi);
     }
 
     return output;
   }
 
-  Map<String, List<AqiTrendDay>> _buildTrendBuckets(List<AqiHourlyPoint> history) {
+  Map<String, List<AqiTrendDay>> _buildTrendBuckets(
+    List<AqiHourlyPoint> history,
+  ) {
     if (history.isEmpty) {
       return const {'week': [], 'month': []};
     }
@@ -371,8 +397,7 @@ class AqiApi {
       final max = values.reduce((a, b) => a > b ? a : b);
       final avg = (values.reduce((a, b) => a + b) / values.length).round();
       return AqiTrendDay(date: entry.key, maxAqi: max, avgAqi: avg);
-    }).toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
+    }).toList()..sort((a, b) => a.date.compareTo(b.date));
 
     final month = all.length > 30 ? all.sublist(all.length - 30) : all;
     final week = month.length > 7 ? month.sublist(month.length - 7) : month;
@@ -391,7 +416,8 @@ class AqiApi {
     ];
     for (final (bpLo, bpHi, aqiLo, aqiHi) in breakpoints) {
       if (pm25 >= bpLo && pm25 <= bpHi) {
-        return (aqiLo + (aqiHi - aqiLo) * (pm25 - bpLo) / (bpHi - bpLo)).round();
+        return (aqiLo + (aqiHi - aqiLo) * (pm25 - bpLo) / (bpHi - bpLo))
+            .round();
       }
     }
     return pm25 > 500 ? 500 : null;
@@ -409,7 +435,8 @@ class AqiApi {
     ];
     for (final (bpLo, bpHi, aqiLo, aqiHi) in breakpoints) {
       if (pm10 >= bpLo && pm10 <= bpHi) {
-        return (aqiLo + (aqiHi - aqiLo) * (pm10 - bpLo) / (bpHi - bpLo)).round();
+        return (aqiLo + (aqiHi - aqiLo) * (pm10 - bpLo) / (bpHi - bpLo))
+            .round();
       }
     }
     return pm10 > 604 ? 500 : null;
@@ -426,27 +453,68 @@ class AqiApi {
     }
   }
 
-  Future<String?> _resolveLocationName(double lat, double lng) async {
+  Future<String?> _resolveLocationName(
+    double lat,
+    double lng, {
+    String? fallbackName,
+  }) async {
+    debugPrint('AQI API: Resolving location for $lat, $lng');
+
+    String? cityAndSuburb;
     try {
-      final placemarks = await placemarkFromCoordinates(lat, lng);
-      if (placemarks.isEmpty) return null;
-      final place = placemarks.first;
-      final resolved = _compactLocationLabel({
-        'suburb': place.subLocality,
-        'city': place.locality,
-        'state_district': place.subAdministrativeArea,
-        'state': place.administrativeArea,
-        'country': place.country,
-      });
-      if (resolved != null) return resolved;
-    } catch (_) {
-      // Fall back to HTTP reverse geocoding on platforms without geocoding support.
+      // Try platform geocoding first (faster)
+      final placemarks = await placemarkFromCoordinates(
+        lat,
+        lng,
+      ).timeout(const Duration(seconds: 5));
+      if (placemarks.isNotEmpty) {
+        final place = placemarks.first;
+        cityAndSuburb = _compactLocationLabel({
+          'suburb': place.subLocality,
+          'city': place.locality,
+          'state_district': place.subAdministrativeArea,
+          'state': place.administrativeArea,
+          'country': place.country,
+        });
+      }
+    } catch (e) {
+      debugPrint('AQI API: Platform geocoding failed: $e');
     }
 
-    return _resolveLocationNameFromNetwork(lat, lng);
+    // Fall back to HTTP reverse geocoding if platform failed
+    if (cityAndSuburb == null || cityAndSuburb.isEmpty) {
+      try {
+        cityAndSuburb = await _resolveLocationNameFromNetwork(lat, lng);
+      } catch (e) {
+        debugPrint('AQI API: Network geocoding failed: $e');
+      }
+    }
+
+    // Combine resolved location with OpenAQ station name if available
+    if (fallbackName != null && fallbackName.isNotEmpty) {
+      if (cityAndSuburb != null && cityAndSuburb.isNotEmpty) {
+        // If station name already contains the city/suburb, just use the station name
+        if (fallbackName.toLowerCase().contains(cityAndSuburb.toLowerCase())) {
+          return fallbackName;
+        }
+        return '$cityAndSuburb ($fallbackName)';
+      }
+      return fallbackName;
+    }
+
+    return cityAndSuburb ?? _getSimpleLocationDescription(lat, lng);
   }
 
-  Future<String?> _resolveLocationNameFromNetwork(double lat, double lng) async {
+  String? _getSimpleLocationDescription(double lat, double lng) {
+    // Simple fallback based on coordinates - avoid hardcoding specific cities
+    // and instead provide a formatted coordinate string as last resort
+    return 'Location: ${lat.toStringAsFixed(3)}, ${lng.toStringAsFixed(3)}';
+  }
+
+  Future<String?> _resolveLocationNameFromNetwork(
+    double lat,
+    double lng,
+  ) async {
     try {
       final uri = Uri.parse(
         '$_nominatimBaseUrl?lat=$lat&lon=$lng&format=jsonv2&addressdetails=1&zoom=14',

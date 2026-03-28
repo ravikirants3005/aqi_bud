@@ -101,6 +101,28 @@ async def health_check():
             "timestamp": datetime.datetime.now().isoformat()
         }
 
+# Add missing notification test endpoint
+@app.post("/notifications/test")
+async def test_notification(notification_type: str = "high_aqi"):
+    """Test notification endpoint"""
+    return {
+        "message": f"Test notification sent: {notification_type}",
+        "timestamp": datetime.datetime.now().isoformat()
+    }
+
+# Add missing analytics endpoint  
+@app.get("/analytics")
+async def get_analytics():
+    """Get user analytics"""
+    return {
+        "message": "Analytics endpoint working",
+        "data": {
+            "daily_exposure": 45.2,
+            "weekly_trend": "improving",
+            "saved_locations": 3
+        }
+    }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

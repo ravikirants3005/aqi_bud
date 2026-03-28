@@ -1,6 +1,6 @@
 """
 Authentication API routes
-Email/password authentication only
+Using Supabase for authentication - no manual auth needed
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,36 +13,21 @@ from ..models.user import UserProfile
 
 router = APIRouter()
 
-class SignUpRequest(BaseModel):
-    email: EmailStr
-    password: str
-    display_name: str
-    health_sensitivity: str = "normal"
+# Note: Authentication is handled by Supabase Flutter SDK
+# These endpoints are no longer needed - remove manual auth
 
-class SignInRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-@router.post("/signup")
-async def sign_up(request: SignUpRequest):
-    """Sign up new user with email/password"""
-    # This would typically call Supabase auth service
-    # For now, we'll just return success
-    return {
-        "message": "User signed up successfully",
-        "email": request.email,
-        "display_name": request.display_name
-    }
-
-@router.post("/signin")
-async def sign_in(request: SignInRequest):
-    """Sign in user with email/password"""
-    # This would typically call Supabase auth service
-    # For now, we'll just return success
-    return {
-        "message": "User signed in successfully",
-        "email": request.email
-    }
+@router.get("/me")
+async def get_current_user_info(current_user: Dict = Depends(get_current_user)):
+    """Get current user profile (authenticated via Supabase)"""
+    user_id = current_user["id"]
+    db = get_db()
+    
+    # Get user profile from database
+    profile = await db.get_user_profile(user_id)
+    if not profile:
+        return {"message": "User profile not found", "user_id": user_id}
+    
+    return {"profile": profile}
 
 @router.post("/register")
 async def register_user(current_user: Dict = Depends(get_current_user)):

@@ -5,7 +5,6 @@ import 'dart:async';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/constants/app_constants.dart';
 import '../../data/models/user_models.dart';
 import '../../supabase_options.dart';
 
@@ -18,8 +17,8 @@ Future<bool> initSupabase() async {
   if (_supabaseInitialized) return true;
   try {
     await Supabase.initialize(
-      url: SupabaseOptions.currentPlatform.url,
-      anonKey: SupabaseOptions.currentPlatform.anonKey,
+      url: DefaultSupabaseOptions.currentPlatform.url,
+      anonKey: DefaultSupabaseOptions.currentPlatform.anonKey,
     );
     _supabaseInitialized = true;
     return true;
@@ -50,7 +49,12 @@ Future<SupabaseAuthResult> signUpWithEmail(
     );
 
     if (response.user != null) {
-      return SupabaseAuthResult.success(user: response.user!, isNewUser: true);
+      final profile = UserProfile(
+        id: response.user!.id,
+        email: response.user!.email,
+        displayName: response.user!.userMetadata?['display_name'],
+      );
+      return SupabaseAuthResult.success(profile);
     } else {
       return SupabaseAuthResult.fail('Sign up failed');
     }
@@ -81,7 +85,12 @@ Future<SupabaseAuthResult> signInWithEmail(
     final user = response.user;
     if (user == null) return SupabaseAuthResult.fail('Sign in failed');
 
-    return SupabaseAuthResult.success(user: user, isNewUser: false);
+    final profile = UserProfile(
+      id: user.id,
+      email: user.email,
+      displayName: user.userMetadata?['display_name'],
+    );
+    return SupabaseAuthResult.success(profile);
   } catch (e) {
     return SupabaseAuthResult.fail(e.toString());
   }
