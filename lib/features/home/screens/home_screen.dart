@@ -20,15 +20,15 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Use direct AQI provider for now (no auth required)
     final aqiAsync = ref.watch(currentAqiProvider);
-    final forecastAsync = ref.watch(backendAqiForecastProvider);
+    final historyAsync = ref.watch(aqiHourlyHistoryProvider);
+    final trendsAsync = ref.watch(aqiTrendsProvider);
     final profile = ref.watch(userProfileProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF060E20),
+      backgroundColor: const Color(0xFF081217),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF060E20),
+        backgroundColor: const Color(0xFF12242B),
         foregroundColor: Colors.white,
         title: const Text('AQI Buddy'),
         actions: [
@@ -39,16 +39,19 @@ class HomeScreen extends ConsumerWidget {
         ],
       ),
       body: Container(
-        decoration: const BoxDecoration(color: Color(0xFF060E20)),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF081217), Color(0xFF0D1A21), Color(0xFF122A34)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
         child: RefreshIndicator(
           onRefresh: () async {
-            final locationResult = ref.refresh(locationProvider);
-            final aqiResult = ref.refresh(currentAqiProvider);
-            final forecastResult = ref.refresh(backendAqiForecastProvider);
-            // Results are used to satisfy the analyzer
-            locationResult;
-            aqiResult;
-            forecastResult;
+            ref.invalidate(locationProvider);
+            ref.invalidate(currentAqiProvider);
+            ref.invalidate(aqiHourlyHistoryProvider);
+            ref.invalidate(aqiTrendsProvider);
           },
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -61,51 +64,18 @@ class HomeScreen extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       aqiAsync.when(
-                        data: (data) {
-                          if (data != null) {
-                            return _HeroCard(
-                              data: data,
-                              profile: profile,
-                              onSave: () => _saveCurrentLocation(
-                                context,
-                                ref,
-                                profile,
-                                data,
+                        data: (data) => data == null
+                            ? _LocationDisabledCard(ref: ref)
+                            : _HeroCard(
+                                data: data,
+                                profile: profile,
+                                onSave: () => _saveCurrentLocation(
+                                  context,
+                                  ref,
+                                  profile,
+                                  data,
+                                ),
                               ),
-                            );
-                          }
-                          // Check if permission is actually granted but location is still null
-                          return ref
-                              .watch(locationPermissionProvider)
-                              .when(
-                                data: (granted) => _LocationDisabledCard(
-                                  ref: ref,
-                                  permissionGranted: granted,
-                                ),
-                                loading: () {
-                                  // While loading AQI, check if it's because we're waiting for location
-                                  final locationAsync = ref.watch(
-                                    locationProvider,
-                                  );
-                                  final message = locationAsync.when(
-                                    data: (pos) => pos == null
-                                        ? 'Locating you...'
-                                        : 'Fetching AQI for ${pos.latitude.toStringAsFixed(2)}, ${pos.longitude.toStringAsFixed(2)}...',
-                                    loading: () => 'Finding your location...',
-                                    error: (_, __) =>
-                                        'Location error, retrying...',
-                                  );
-                                  return _LoadingPanel(
-                                    height: 320,
-                                    message: message,
-                                  );
-                                },
-                                error: (_, __) => _LocationDisabledCard(
-                                  ref: ref,
-                                  permissionGranted: false,
-                                ),
-                              );
-                        },
                         loading: () => const _LoadingPanel(height: 320),
                         error: (error, _) => const _MessagePanel(
                           title: 'Live AQI snapshot unavailable',
@@ -114,16 +84,18 @@ class HomeScreen extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(height: 20),
-                      forecastAsync.when(
-                        data: (forecast) => _ForecastCard(
+                      historyAsync.when(
+                        data: (history) => _HourlyHistoryCard(
                           currentData: aqiAsync.valueOrNull,
-                          forecast: forecast,
+                          history: history,
                         ),
-                        loading: () => const CircularProgressIndicator(),
-                        error: (e, s) => Text('Forecast error: $e'),
+                        loading: () => const _LoadingPanel(height: 300),
+                        error: (error, _) => const _MessagePanel(
+                          title: '24-Hour AQI Wave',
+                          message:
+                              'Live hourly history could not be loaded right now.',
+                        ),
                       ),
-                      const SizedBox(height: 20),
-                      const _ActionDeck(),
                     ],
                   ),
                 ),
@@ -312,6 +284,7 @@ class _HeroCard extends ConsumerWidget {
                       icon: Icons.place_outlined,
                       label: _locationLabel(data),
                       color: const Color(0xFF69F6B8),
+                      onTap: () => _correctLocation(context, ref, data),
                     ),
                   ],
                 ),
@@ -1110,37 +1083,41 @@ class _ActionCard extends StatelessWidget {
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({required this.icon, required this.label, required this.color});
+  const _Pill({required this.icon, required this.label, required this.color, this.onTap});
 
   final IconData icon;
   final String label;
   final Color color;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: color.withValues(alpha: 0.12),
-        border: Border.all(
-          color: const Color(0xFF40485D).withValues(alpha: 0.15),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 260),
-            child: Text(
-              label,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: color, fontWeight: FontWeight.w700),
-            ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          color: color.withValues(alpha: 0.12),
+          border: Border.all(
+            color: const Color(0xFF40485D).withValues(alpha: 0.15),
           ),
-        ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 260),
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: color, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1367,6 +1344,67 @@ String _locationLabel(AqiData data) {
   return 'Location: ${data.lat.toStringAsFixed(3)}, ${data.lng.toStringAsFixed(3)}';
 }
 
+void _correctLocation(BuildContext context, WidgetRef ref, AqiData data) async {
+  final controller = TextEditingController(text: _locationLabel(data));
+  
+  final correctedName = await showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Correct Location'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Current location detected:'),
+          const SizedBox(height: 8),
+          Text(
+            'GPS: ${data.lat.toStringAsFixed(6)}, ${data.lng.toStringAsFixed(6)}',
+            style: const TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+          const SizedBox(height: 16),
+          const Text('Enter correct location name:'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: controller,
+            decoration: const InputDecoration(
+              hintText: 'e.g., Your Area, Bengaluru',
+              border: OutlineInputBorder(),
+            ),
+            maxLength: 50,
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(controller.text.trim()),
+          child: const Text('Update'),
+        ),
+      ],
+    ),
+  );
+  
+  if (correctedName != null && correctedName.isNotEmpty) {
+    // Set the location name override
+    ref.read(locationNameOverrideProvider.notifier).state = correctedName;
+    
+    // Invalidate the AQI provider to refresh with the new name
+    ref.invalidate(currentAqiProvider);
+    
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Location updated to: $correctedName'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+}
+
 Future<void> _requestLocationAccess(BuildContext context, WidgetRef ref) async {
   // Use SimpleLocationService for straightforward permission handling
   final hasPermission = await SimpleLocationService.requestLocationPermission();
@@ -1380,7 +1418,7 @@ Future<void> _requestLocationAccess(BuildContext context, WidgetRef ref) async {
     // Refresh the providers to get new location data
     ref.invalidate(locationProvider);
     ref.invalidate(currentAqiProvider);
-    ref.invalidate(backendAqiForecastProvider);
+    ref.invalidate(aqiForecastProvider);
   } else {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

@@ -459,6 +459,7 @@ class AqiApi {
     String? fallbackName,
   }) async {
     debugPrint('AQI API: Resolving location for $lat, $lng');
+    debugPrint('AQI API: GPS accuracy check - these coordinates resolve to:');
 
     String? cityAndSuburb;
     try {
@@ -466,16 +467,50 @@ class AqiApi {
       final placemarks = await placemarkFromCoordinates(
         lat,
         lng,
-      ).timeout(const Duration(seconds: 5));
-      if (placemarks.isNotEmpty) {
+      ).timeout(const Duration(seconds: 8));
+      if (placemarks != null && placemarks.isNotEmpty) {
         final place = placemarks.first;
-        cityAndSuburb = _compactLocationLabel({
-          'suburb': place.subLocality,
-          'city': place.locality,
-          'state_district': place.subAdministrativeArea,
-          'state': place.administrativeArea,
-          'country': place.country,
-        });
+        
+        // Build location label with null-safe field access
+        final locationParts = <String>[];
+        
+        // Add suburb/sublocality if available
+        final suburb = place.subLocality?.trim();
+        if (suburb != null && suburb.isNotEmpty) {
+          locationParts.add(suburb);
+        }
+        
+        // Add city/locality if available
+        final city = place.locality?.trim();
+        if (city != null && city.isNotEmpty && !locationParts.contains(city)) {
+          locationParts.add(city);
+        }
+        
+        // Add administrative area if no city found
+        if (locationParts.isEmpty) {
+          final adminArea = place.administrativeArea?.trim();
+          if (adminArea != null && adminArea.isNotEmpty) {
+            locationParts.add(adminArea);
+          }
+        }
+        
+        // Add country as last resort
+        if (locationParts.isEmpty) {
+          final country = place.country?.trim();
+          if (country != null && country.isNotEmpty) {
+            locationParts.add(country);
+          }
+        }
+        
+        cityAndSuburb = locationParts.isNotEmpty ? locationParts.join(', ') : null;
+        
+        if (cityAndSuburb != null) {
+          debugPrint('AQI API: Platform geocoding success: $cityAndSuburb');
+        } else {
+          debugPrint('AQI API: Platform geocoding returned empty location data.');
+        }
+      } else {
+        debugPrint('AQI API: Platform geocoding returned empty placemark list.');
       }
     } catch (e) {
       debugPrint('AQI API: Platform geocoding failed: $e');
@@ -484,10 +519,23 @@ class AqiApi {
     // Fall back to HTTP reverse geocoding if platform failed
     if (cityAndSuburb == null || cityAndSuburb.isEmpty) {
       try {
+        debugPrint('AQI API: Trying network geocoding fallback...');
         cityAndSuburb = await _resolveLocationNameFromNetwork(lat, lng);
+        if (cityAndSuburb != null) {
+          debugPrint('AQI API: Network geocoding success: $cityAndSuburb');
+        } else {
+          debugPrint('AQI API: Network geocoding returned null');
+        }
       } catch (e) {
         debugPrint('AQI API: Network geocoding failed: $e');
       }
+    }
+
+    // Show coordinate-based location as fallback for user awareness
+    if (cityAndSuburb == null || cityAndSuburb.isEmpty) {
+      final coordLocation = _getSimpleLocationDescription(lat, lng);
+      debugPrint('AQI API: Using coordinate-based location: $coordLocation');
+      cityAndSuburb = coordLocation;
     }
 
     // Combine resolved location with OpenAQ station name if available
@@ -495,14 +543,19 @@ class AqiApi {
       if (cityAndSuburb != null && cityAndSuburb.isNotEmpty) {
         // If station name already contains the city/suburb, just use the station name
         if (fallbackName.toLowerCase().contains(cityAndSuburb.toLowerCase())) {
+          debugPrint('AQI API: Using fallback name (contains location): $fallbackName');
           return fallbackName;
         }
-        return '$cityAndSuburb ($fallbackName)';
+        final combined = '$cityAndSuburb ($fallbackName)';
+        debugPrint('AQI API: Combined location: $combined');
+        return combined;
       }
+      debugPrint('AQI API: Using fallback name only: $fallbackName');
       return fallbackName;
     }
 
-    return cityAndSuburb ?? _getSimpleLocationDescription(lat, lng);
+    debugPrint('AQI API: Final resolved location: $cityAndSuburb');
+    return cityAndSuburb;
   }
 
   String? _getSimpleLocationDescription(double lat, double lng) {
@@ -519,20 +572,42 @@ class AqiApi {
       final uri = Uri.parse(
         '$_nominatimBaseUrl?lat=$lat&lon=$lng&format=jsonv2&addressdetails=1&zoom=14',
       );
+      debugPrint('AQI API: Making network geocoding request...');
       final resp = await http
           .get(uri, headers: _reverseGeocodeHeaders)
-          .timeout(const Duration(seconds: 10));
-      if (resp.statusCode != 200) return null;
+          .timeout(const Duration(seconds: 12));
+      if (resp.statusCode != 200) {
+        debugPrint('AQI API: Network geocoding HTTP ${resp.statusCode}');
+        return null;
+      }
 
       final json = jsonDecode(resp.body) as Map<String, dynamic>;
       final address = json['address'] as Map<String, dynamic>?;
+      
+      if (address == null) {
+        debugPrint('AQI API: Network geocoding - no address data in response');
+        // Try display_name as fallback
+        final displayName = (json['display_name'] as String?)?.trim();
+        if (displayName != null && displayName.isNotEmpty) {
+          final shortName = displayName.split(',').take(2).join(', ').trim();
+          debugPrint('AQI API: Network geocoding using display_name: $shortName');
+          return shortName;
+        }
+        return null;
+      }
+      
       final resolved = _compactLocationLabel(address);
-      if (resolved != null) return resolved;
+      if (resolved != null) {
+        return resolved;
+      }
 
       final displayName = (json['display_name'] as String?)?.trim();
       if (displayName == null || displayName.isEmpty) return null;
-      return displayName.split(',').take(3).join(', ').trim();
-    } catch (_) {
+      final shortName = displayName.split(',').take(3).join(', ').trim();
+      debugPrint('AQI API: Network geocoding using truncated display_name: $shortName');
+      return shortName;
+    } catch (e) {
+      debugPrint('AQI API: Network geocoding exception: $e');
       return null;
     }
   }

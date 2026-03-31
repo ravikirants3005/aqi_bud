@@ -5,8 +5,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../main.dart';
@@ -82,8 +82,8 @@ final locationProvider = FutureProvider<Position?>((ref) async {
   final pos = await SimpleLocationService.getCurrentLocation();
   if (pos != null) return pos;
 
-  // Try to get last known as a secondary fallback if not already tried
-  return await Geolocator.getLastKnownPosition();
+  // Secondary fallback, but only if it is recent and reasonably accurate.
+  return await SimpleLocationService.getRecentLastKnownPosition();
 });
 
 final locationPermissionProvider = FutureProvider<bool>((ref) async {
@@ -103,6 +103,12 @@ final currentAqiProvider = FutureProvider<AqiData?>((ref) async {
   final repo = ref.watch(aqiRepoProvider);
   final data = await repo.getCurrentAqi(pos.latitude, pos.longitude);
 
+  // Check for location name override
+  final override = ref.read(locationNameOverrideProvider);
+  if (override != null && data != null) {
+    return data.copyWith(locationName: override);
+  }
+
   if (data != null) {
     debugPrint(
       'AQI PROVIDER: Data fetched successfully for ${data.locationName}',
@@ -113,6 +119,9 @@ final currentAqiProvider = FutureProvider<AqiData?>((ref) async {
 
   return data;
 });
+
+// Location name override for user corrections
+final locationNameOverrideProvider = StateProvider<String?>((ref) => null);
 
 // Backend AQI Providers
 final backendCurrentAqiProvider = FutureProvider<AqiData?>((ref) async {
@@ -129,6 +138,28 @@ final backendAqiForecastProvider = FutureProvider<List<Map<String, dynamic>>>((
   if (pos == null) return [];
   final backendRepo = ref.watch(backendRepositoryProvider);
   return await backendRepo.getAQIForecastBackend(pos.latitude, pos.longitude);
+});
+
+final aqiForecastProvider = FutureProvider<List<Map<String, dynamic>>>((
+  ref,
+) async {
+  final trends = await ref.watch(aqiTrendsProvider.future);
+  final week = trends['week'] ?? const <AqiTrendDay>[];
+  if (week.isEmpty) return const <Map<String, dynamic>>[];
+
+  final rows =
+      week
+          .map(
+            (day) => <String, dynamic>{
+              'date':
+                  '${day.date.year.toString().padLeft(4, '0')}-${day.date.month.toString().padLeft(2, '0')}-${day.date.day.toString().padLeft(2, '0')}',
+              'aqi': day.avgAqi,
+              'pm25': '-',
+            },
+          )
+          .toList();
+
+  return rows;
 });
 
 final aqiHourlyHistoryProvider = FutureProvider<List<AqiHourlyPoint>>((

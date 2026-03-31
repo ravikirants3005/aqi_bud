@@ -103,6 +103,26 @@ class AqiData extends Equatable {
 
   AqiCategory get category => aqiToCategory(aqi);
 
+  AqiData copyWith({
+    int? aqi,
+    double? lat,
+    double? lng,
+    DateTime? timestamp,
+    double? pm25,
+    double? pm10,
+    String? locationName,
+  }) {
+    return AqiData(
+      aqi: aqi ?? this.aqi,
+      lat: lat ?? this.lat,
+      lng: lng ?? this.lng,
+      timestamp: timestamp ?? this.timestamp,
+      pm25: pm25 ?? this.pm25,
+      pm10: pm10 ?? this.pm10,
+      locationName: locationName ?? this.locationName,
+    );
+  }
+
   @override
   List<Object?> get props => [aqi, lat, lng, timestamp];
 }
