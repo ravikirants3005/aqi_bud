@@ -23,7 +23,9 @@ class Settings(BaseSettings):
     allowed_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
     
     # Push Notification Configuration
-    push_notifications_enabled: bool = False
+    push_notifications_enabled: bool = True
+    onesignal_app_id: Optional[str] = None
+    onesignal_rest_api_key: Optional[str] = None
     firebase_server_key: Optional[str] = None
     
     # AQI API Configuration

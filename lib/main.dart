@@ -5,7 +5,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart';
 
 import 'core/config/runtime_config.dart';
 import 'core/router/app_router.dart';
@@ -34,13 +33,6 @@ void main() async {
       child: AuthLoader(child: const AqiBuddyApp()),
     ),
   );
-
-  // Initialize notifications and backend after app is built
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    final container = ProviderContainer();
-    container.read(userProfileProvider.notifier).initializeNotifications();
-    container.read(userProfileProvider.notifier).initializeBackendProfile();
-  });
 }
 
 class AqiBuddyApp extends StatelessWidget {

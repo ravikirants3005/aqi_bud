@@ -1,24 +1,34 @@
 -- AQI Buddy Supabase Database Schema
 -- Run this in Supabase SQL Editor
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Create tables for AQI Buddy app
 
 -- User profiles
 CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     email TEXT UNIQUE,
     phone TEXT UNIQUE,
     display_name TEXT NOT NULL,
     health_sensitivity TEXT DEFAULT 'normal' CHECK (health_sensitivity IN ('normal', 'sensitive', 'asthmatic', 'elderly')),
     age_group TEXT,
-    notification_prefs JSONB DEFAULT '{"high_aqi_alerts": true, "daily_exposure_summary": true, "weekly_insights": true, "tip_of_day": false}',
+    notification_prefs JSONB DEFAULT '{"highAqiAlerts": true, "dailyExposureSummary": true, "weeklyInsights": true, "tipOfDay": false}',
+    push_token TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS health_sensitivity TEXT DEFAULT 'normal';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS age_group TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB DEFAULT '{"highAqiAlerts": true, "dailyExposureSummary": true, "weeklyInsights": true, "tipOfDay": false}';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS push_token TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
 -- Exposure records
 CREATE TABLE IF NOT EXISTS exposure_history (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
     date DATE NOT NULL,
     score FLOAT NOT NULL CHECK (score >= 0 AND score <= 100),
@@ -29,9 +39,14 @@ CREATE TABLE IF NOT EXISTS exposure_history (
     UNIQUE(user_id, date)
 );
 
+ALTER TABLE exposure_history ADD COLUMN IF NOT EXISTS max_aqi INTEGER;
+ALTER TABLE exposure_history ADD COLUMN IF NOT EXISTS outdoor_minutes INTEGER DEFAULT 0;
+ALTER TABLE exposure_history ADD COLUMN IF NOT EXISTS location_exposures JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE exposure_history ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
 -- Saved locations
 CREATE TABLE IF NOT EXISTS saved_locations (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     lat FLOAT NOT NULL,
@@ -40,6 +55,10 @@ CREATE TABLE IF NOT EXISTS saved_locations (
     last_updated TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+ALTER TABLE saved_locations ADD COLUMN IF NOT EXISTS last_aqi INTEGER;
+ALTER TABLE saved_locations ADD COLUMN IF NOT EXISTS last_updated TIMESTAMP WITH TIME ZONE;
+ALTER TABLE saved_locations ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
 
 -- AQI cache
 CREATE TABLE IF NOT EXISTS aqi_cache (
@@ -73,6 +92,24 @@ ALTER TABLE aqi_cache ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies
 
+DROP POLICY IF EXISTS "Users can view own profile" ON users;
+DROP POLICY IF EXISTS "Users can insert own profile" ON users;
+DROP POLICY IF EXISTS "Users can update own profile" ON users;
+
+DROP POLICY IF EXISTS "Users can view own exposure records" ON exposure_history;
+DROP POLICY IF EXISTS "Users can insert own exposure records" ON exposure_history;
+DROP POLICY IF EXISTS "Users can update own exposure records" ON exposure_history;
+DROP POLICY IF EXISTS "Users can delete own exposure records" ON exposure_history;
+
+DROP POLICY IF EXISTS "Users can view own saved locations" ON saved_locations;
+DROP POLICY IF EXISTS "Users can insert own saved locations" ON saved_locations;
+DROP POLICY IF EXISTS "Users can update own saved locations" ON saved_locations;
+DROP POLICY IF EXISTS "Users can delete own saved locations" ON saved_locations;
+
+DROP POLICY IF EXISTS "AQI cache is publicly readable" ON aqi_cache;
+DROP POLICY IF EXISTS "Anyone can insert AQI cache" ON aqi_cache;
+DROP POLICY IF EXISTS "Anyone can update AQI cache" ON aqi_cache;
+
 -- Users can only access their own profile
 CREATE POLICY "Users can view own profile" ON users FOR SELECT USING (auth.uid()::text = id);
 CREATE POLICY "Users can insert own profile" ON users FOR INSERT WITH CHECK (auth.uid()::text = id);
@@ -105,5 +142,6 @@ END;
 $$ language 'plpgsql';
 
 -- Trigger to automatically update updated_at
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

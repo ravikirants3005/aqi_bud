@@ -104,7 +104,9 @@ class ProfileScreen extends ConsumerWidget {
                   fontWeight: selected ? FontWeight.bold : FontWeight.normal,
                 ),
                 side: BorderSide(
-                  color: selected ? const Color(0xFF69F6B8).withValues(alpha: 0.5) : const Color(0xFF40485D).withValues(alpha: 0.15),
+                  color: selected
+                      ? const Color(0xFF69F6B8).withValues(alpha: 0.5)
+                      : const Color(0xFF40485D).withValues(alpha: 0.15),
                 ),
                 onSelected: (_) {
                   ref.read(userProfileProvider.notifier).updateSensitivity(s);
@@ -114,7 +116,8 @@ class ProfileScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            (profile?.healthSensitivity ?? HealthSensitivity.normal).description,
+            (profile?.healthSensitivity ?? HealthSensitivity.normal)
+                .description,
             style: TextStyle(
               fontSize: 12,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -130,18 +133,22 @@ class ProfileScreen extends ConsumerWidget {
             title: 'High AQI alerts',
             value: profile?.notificationPrefs.highAqiAlerts ?? true,
             onChanged: (v) {
-              final p = profile?.notificationPrefs ?? const NotificationPreferences();
-              ref.read(userProfileProvider.notifier).updateNotificationPrefs(
-                    p.copyWith(highAqiAlerts: v),
-                  );
+              final p =
+                  profile?.notificationPrefs ?? const NotificationPreferences();
+              ref
+                  .read(userProfileProvider.notifier)
+                  .updateNotificationPreferences(p.copyWith(highAqiAlerts: v));
             },
           ),
           _NotificationSwitch(
             title: 'Daily exposure summary',
             value: profile?.notificationPrefs.dailyExposureSummary ?? true,
             onChanged: (v) {
-              final p = profile?.notificationPrefs ?? const NotificationPreferences();
-              ref.read(userProfileProvider.notifier).updateNotificationPrefs(
+              final p =
+                  profile?.notificationPrefs ?? const NotificationPreferences();
+              ref
+                  .read(userProfileProvider.notifier)
+                  .updateNotificationPreferences(
                     p.copyWith(dailyExposureSummary: v),
                   );
             },
@@ -150,20 +157,22 @@ class ProfileScreen extends ConsumerWidget {
             title: 'Weekly insights',
             value: profile?.notificationPrefs.weeklyInsights ?? true,
             onChanged: (v) {
-              final p = profile?.notificationPrefs ?? const NotificationPreferences();
-              ref.read(userProfileProvider.notifier).updateNotificationPrefs(
-                    p.copyWith(weeklyInsights: v),
-                  );
+              final p =
+                  profile?.notificationPrefs ?? const NotificationPreferences();
+              ref
+                  .read(userProfileProvider.notifier)
+                  .updateNotificationPreferences(p.copyWith(weeklyInsights: v));
             },
           ),
           _NotificationSwitch(
             title: 'Tip of the day',
             value: profile?.notificationPrefs.tipOfDay ?? true,
             onChanged: (v) {
-              final p = profile?.notificationPrefs ?? const NotificationPreferences();
-              ref.read(userProfileProvider.notifier).updateNotificationPrefs(
-                    p.copyWith(tipOfDay: v),
-                  );
+              final p =
+                  profile?.notificationPrefs ?? const NotificationPreferences();
+              ref
+                  .read(userProfileProvider.notifier)
+                  .updateNotificationPreferences(p.copyWith(tipOfDay: v));
             },
           ),
           const SizedBox(height: 24),
@@ -186,6 +195,16 @@ class ProfileScreen extends ConsumerWidget {
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/saved-locations'),
+          ),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.notifications_active_outlined),
+            title: const Text('Test local notification'),
+            subtitle: const Text(
+              'Send a local test notification on this device',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/notification-test'),
           ),
         ],
       ),

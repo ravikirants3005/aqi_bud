@@ -10,6 +10,7 @@ from typing import Dict, Any
 from ..core.security import get_current_user, extract_health_sensitivity, extract_display_name
 from ..core.database import get_db
 from ..models.user import UserProfile
+from ..core.serializers import serialize_user_profile
 
 router = APIRouter()
 
@@ -27,7 +28,7 @@ async def get_current_user_info(current_user: Dict = Depends(get_current_user)):
     if not profile:
         return {"message": "User profile not found", "user_id": user_id}
     
-    return {"profile": profile}
+    return {"profile": serialize_user_profile(profile)}
 
 @router.post("/register")
 async def register_user(current_user: Dict = Depends(get_current_user)):

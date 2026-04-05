@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/runtime_config.dart';
-import '../../core/constants/app_constants.dart';
+import '../constants/app_constants.dart';
 import '../../data/models/user_models.dart';
 import '../../data/models/aqi_models.dart';
 import '../../data/models/exposure_models.dart';
@@ -17,8 +17,7 @@ class BackendApi {
 
   final RuntimeConfig _config;
 
-  // Backend URL - update this to match your backend server
-  static const String _baseUrl = 'http://localhost:8000';
+  String get _baseUrl => _config.backendBaseUrl;
 
   // Get current JWT token from Supabase
   String? _getAuthToken() {
@@ -251,7 +250,12 @@ class BackendApi {
         headers: _getHeaders(),
       );
 
-      return response.statusCode == 200;
+      if (response.statusCode != 200) {
+        return false;
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data['delivered'] as bool? ?? true;
     } catch (e) {
       print('Error testing notification: $e');
       return false;

@@ -5,11 +5,13 @@ Current AQI data and forecasting
 
 from fastapi import APIRouter, Depends, Query
 from typing import Dict, Any, List
+from fastapi import HTTPException
 
 from ..core.security import get_current_user, extract_health_sensitivity, extract_notification_prefs
 from ..core.database import get_db
 from ..services.aqi_service import AQIService
 from ..services.notification_service import NotificationService
+from ..core.serializers import serialize_aqi_data
 
 router = APIRouter()
 
@@ -42,10 +44,10 @@ async def get_current_aqi(
             "elderly": 75
         }.get(health_sensitivity, 150)
         
-        if aqi_data.aqi >= threshold and notification_prefs.get("high_aqi_alerts", True):
+        if aqi_data["aqi"] >= threshold and notification_prefs.get("high_aqi_alerts", True):
             await notification_service.send_high_aqi_alert(current_user, aqi_data)
         
-        return aqi_data
+        return serialize_aqi_data(aqi_data)
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to fetch AQI data")
 

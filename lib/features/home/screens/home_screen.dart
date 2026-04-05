@@ -137,7 +137,7 @@ class HomeScreen extends ConsumerWidget {
           if (index == 1) context.push('/health-tips');
           if (index == 2) context.push('/education');
         },
-      ),
+    ),
     );
   }
 
@@ -147,7 +147,6 @@ class HomeScreen extends ConsumerWidget {
     UserProfile? profile,
     AqiData data,
   ) async {
-    final backendRepo = ref.read(backendRepositoryProvider);
     final notifier = ref.read(userProfileProvider.notifier);
     final current = profile?.savedLocations ?? const <SavedLocation>[];
     final locationName = await showDialog<String>(
@@ -199,7 +198,6 @@ class HomeScreen extends ConsumerWidget {
       return;
     }
 
-    // Save to backend
     final savedLocation = SavedLocation(
       id: 'loc_${DateTime.now().millisecondsSinceEpoch}',
       name: locationName,
@@ -210,24 +208,18 @@ class HomeScreen extends ConsumerWidget {
     );
 
     try {
-      // Save to backend
-      final success = await backendRepo.saveLocation(savedLocation);
+      await notifier.updateSavedLocations([...current, savedLocation]);
+      if (!context.mounted) return;
 
-      if (success) {
-        // Update local state
-        notifier.updateSavedLocations([...current, savedLocation]);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$locationName saved to backend!')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to save location to backend')),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$locationName saved to backend!')),
+      );
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error saving location: $e')));
+      if (!context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error saving location: $e')),
+      );
     }
   }
 }
