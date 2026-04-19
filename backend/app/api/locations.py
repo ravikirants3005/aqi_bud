@@ -17,8 +17,8 @@ async def save_location(location_data: Dict[str, Any], current_user: Dict = Depe
     user_id = current_user["id"]
     db = get_db()
     
-    if location_data["user_id"] != user_id:
-        raise Exception("Cannot save location for another user")
+    # Add user_id to location data from authenticated token
+    location_data["user_id"] = user_id
     
     await db.create_saved_location(location_data)
     return {"message": "Location saved successfully"}

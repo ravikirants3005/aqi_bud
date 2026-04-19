@@ -50,17 +50,23 @@ class ExposureRecord extends Equatable {
 
   factory ExposureRecord.fromJson(Map<String, dynamic> json) {
     final locationExposuresJson =
-        json['locationExposures'] as List<dynamic>? ?? [];
-    final locationExposures = locationExposuresJson
+        json['locationExposures'] ?? json['location_exposures'] ?? [];
+    final locationExposures = (locationExposuresJson as List)
         .map((l) => LocationExposure.fromJson(l as Map<String, dynamic>))
         .toList();
 
+    // Handle both frontend and backend field names
+    final dateStr = json['date'] ?? json['record_date'];
+    final score = json['score'] ?? json['total_exposure_score'] ?? 0.0;
+    final maxAqi = json['maxAqi'] ?? json['max_aqi'] ?? 0;
+    final outdoorMins = json['outdoorMinutes'] ?? json['outdoor_minutes'] ?? 0;
+
     return ExposureRecord(
-      id: json['id'] as String,
-      date: DateTime.parse(json['date'] as String),
-      score: (json['score'] as num).toDouble(),
-      maxAqi: json['maxAqi'] as int,
-      outdoorMinutes: Duration(minutes: json['outdoorMinutes'] as int? ?? 0),
+      id: json['id'] as String? ?? 'exp_${DateTime.now().millisecondsSinceEpoch}',
+      date: dateStr != null ? DateTime.parse(dateStr as String) : DateTime.now(),
+      score: (score as num).toDouble(),
+      maxAqi: maxAqi as int,
+      outdoorMinutes: Duration(minutes: outdoorMins as int),
       locationExposures: locationExposures,
     );
   }
@@ -95,12 +101,18 @@ class LocationExposure extends Equatable {
   }
 
   factory LocationExposure.fromJson(Map<String, dynamic> json) {
+    // Handle both frontend and backend field names
+    final lat = json['lat'] ?? json['latitude'];
+    final lng = json['lng'] ?? json['longitude'];
+    final name = json['name'] ?? json['location_name'];
+    final duration = json['duration'] ?? json['duration_minutes'] ?? 0;
+
     return LocationExposure(
-      lat: (json['lat'] as num).toDouble(),
-      lng: (json['lng'] as num).toDouble(),
-      name: json['name'] as String?,
-      aqi: json['aqi'] as int,
-      duration: Duration(minutes: json['duration'] as int),
+      lat: (lat as num).toDouble(),
+      lng: (lng as num).toDouble(),
+      name: name as String?,
+      aqi: (json['aqi'] as num?)?.toInt() ?? 0,
+      duration: Duration(minutes: duration as int),
     );
   }
 

@@ -149,23 +149,34 @@ class SupabaseDB:
         )
     
     # AQI Cache
-    async def cache_aqi_data(self, aqi_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Cache AQI data for 30 minutes"""
+    async def cache_aqi_data(self, aqi_data) -> Dict[str, Any]:
+        """Cache AQI data for 30 minutes - accepts dict or AQIData model"""
         from .config import get_settings
         settings = get_settings()
         
+        # Handle both dict and AQIData model
+        if hasattr(aqi_data, 'dict'):
+            # Pydantic model
+            data = aqi_data.dict()
+        elif hasattr(aqi_data, 'model_dump'):
+            # Pydantic v2
+            data = aqi_data.model_dump()
+        else:
+            # Dict
+            data = aqi_data
+        
         cache_record = {
-            "lat": aqi_data["lat"],
-            "lng": aqi_data["lng"],
-            "aqi": aqi_data["aqi"],
-            "pm25": aqi_data.get("pm25"),
-            "pm10": aqi_data.get("pm10"),
-            "o3": aqi_data.get("o3"),
-            "no2": aqi_data.get("no2"),
-            "so2": aqi_data.get("so2"),
-            "co": aqi_data.get("co"),
-            "location_name": aqi_data.get("location_name"),
-            "data_source": aqi_data.get("data_source", "openmeteo"),
+            "lat": data.get("latitude") if isinstance(data, dict) else getattr(aqi_data, 'latitude', None),
+            "lng": data.get("longitude") if isinstance(data, dict) else getattr(aqi_data, 'longitude', None),
+            "aqi": data.get("aqi") if isinstance(data, dict) else getattr(aqi_data, 'aqi', None),
+            "pm25": data.get("pm25") if isinstance(data, dict) else getattr(aqi_data, 'pm25', None),
+            "pm10": data.get("pm10") if isinstance(data, dict) else getattr(aqi_data, 'pm10', None),
+            "o3": data.get("o3") if isinstance(data, dict) else getattr(aqi_data, 'o3', None),
+            "no2": data.get("no2") if isinstance(data, dict) else getattr(aqi_data, 'no2', None),
+            "so2": data.get("so2") if isinstance(data, dict) else getattr(aqi_data, 'so2', None),
+            "co": data.get("co") if isinstance(data, dict) else getattr(aqi_data, 'co', None),
+            "location_name": data.get("location_name") if isinstance(data, dict) else getattr(aqi_data, 'location_name', None),
+            "data_source": data.get("source", "openmeteo") if isinstance(data, dict) else getattr(aqi_data, 'source', "openmeteo"),
             "cached_at": datetime.utcnow().isoformat(),
             "expires_at": (datetime.utcnow() + datetime.timedelta(minutes=settings.aqi_cache_ttl_minutes)).isoformat()
         }

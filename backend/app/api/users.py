@@ -39,9 +39,8 @@ async def update_user_profile(profile_data: Dict[str, Any], current_user: Dict =
     user_id = current_user["id"]
     db = get_db()
     
-    # Validate user can only update their own profile
-    if profile_data["id"] != user_id:
-        raise Exception("Cannot update another user's profile")
+    # Add user_id from authenticated token
+    profile_data["id"] = user_id
     
     updated_profile = await db.update_user_profile(user_id, profile_data)
     return {"message": "Profile updated successfully", "profile": updated_profile}

@@ -50,14 +50,20 @@ class SavedLocation extends Equatable {
   }
 
   factory SavedLocation.fromJson(Map<String, dynamic> json) {
+    // Handle both frontend and backend field names
+    final lat = json['lat'] ?? json['latitude'];
+    final lng = json['lng'] ?? json['longitude'];
+    final lastAqi = json['lastAqi'] ?? json['last_aqi'];
+    final lastUpdated = json['lastUpdated'] ?? json['last_updated'];
+
     return SavedLocation(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      lat: (json['lat'] as num).toDouble(),
-      lng: (json['lng'] as num).toDouble(),
-      lastAqi: json['lastAqi'] as int?,
-      lastUpdated: json['lastUpdated'] != null
-          ? DateTime.parse(json['lastUpdated'] as String)
+      id: json['id'] as String? ?? json['location_id'] as String? ?? '',
+      name: json['name'] as String? ?? json['location_name'] as String? ?? 'Unknown',
+      lat: (lat as num).toDouble(),
+      lng: (lng as num).toDouble(),
+      lastAqi: lastAqi as int?,
+      lastUpdated: lastUpdated != null
+          ? DateTime.parse(lastUpdated as String)
           : null,
     );
   }
@@ -131,36 +137,37 @@ class UserProfile extends Equatable {
   }
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
+    // Handle both frontend and backend field names
     final healthSensitivityStr =
-        json['healthSensitivity'] as String? ?? 'normal';
+        json['healthSensitivity'] ?? json['health_sensitivity'] ?? 'normal';
     final healthSensitivity = HealthSensitivity.values.firstWhere(
       (s) => s.name == healthSensitivityStr,
       orElse: () => HealthSensitivity.normal,
     );
 
     final notificationPrefsJson =
-        json['notificationPrefs'] as Map<String, dynamic>? ?? {};
+        json['notificationPrefs'] ?? json['notification_prefs'] ?? {};
     final notificationPrefs = NotificationPreferences(
-      highAqiAlerts: notificationPrefsJson['highAqiAlerts'] as bool? ?? true,
+      highAqiAlerts: notificationPrefsJson['highAqiAlerts'] ?? notificationPrefsJson['high_aqi_alerts'] ?? true,
       dailyExposureSummary:
-          notificationPrefsJson['dailyExposureSummary'] as bool? ?? true,
-      weeklyInsights: notificationPrefsJson['weeklyInsights'] as bool? ?? true,
-      tipOfDay: notificationPrefsJson['tipOfDay'] as bool? ?? true,
+          notificationPrefsJson['dailyExposureSummary'] ?? notificationPrefsJson['daily_exposure_summary'] ?? true,
+      weeklyInsights: notificationPrefsJson['weeklyInsights'] ?? notificationPrefsJson['weekly_insights'] ?? true,
+      tipOfDay: notificationPrefsJson['tipOfDay'] ?? notificationPrefsJson['tip_of_day'] ?? true,
     );
 
-    final savedLocationsJson = json['savedLocations'] as List<dynamic>? ?? [];
-    final savedLocations = savedLocationsJson
+    final savedLocationsJson = json['savedLocations'] ?? json['saved_locations'] ?? [];
+    final savedLocations = (savedLocationsJson as List)
         .map((l) => SavedLocation.fromJson(l as Map<String, dynamic>))
         .toList();
 
     return UserProfile(
-      id: json['id'] as String,
+      id: json['id'] as String? ?? '',
       email: json['email'] as String?,
       phone: json['phone'] as String?,
-      displayName: json['displayName'] as String?,
-      photoUrl: json['photoUrl'] as String?,
+      displayName: json['displayName'] ?? json['display_name'] as String?,
+      photoUrl: json['photoUrl'] ?? json['photo_url'] as String?,
       healthSensitivity: healthSensitivity,
-      ageGroup: json['ageGroup'] as String?,
+      ageGroup: json['ageGroup'] ?? json['age_group'] as String?,
       savedLocations: savedLocations,
       notificationPrefs: notificationPrefs,
     );

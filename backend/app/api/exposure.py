@@ -20,8 +20,8 @@ async def record_exposure(exposure_data: Dict[str, Any], current_user: Dict = De
     user_id = current_user["id"]
     db = get_db()
     
-    if exposure_data["user_id"] != user_id:
-        raise Exception("Cannot record exposure for another user")
+    # Add user_id to exposure data from authenticated token
+    exposure_data["user_id"] = user_id
     
     # Create exposure record
     await db.create_exposure_record(exposure_data)

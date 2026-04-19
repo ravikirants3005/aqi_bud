@@ -40,18 +40,20 @@ class AQIService:
                 data = await response.json()
                 current = data.get("current", {})
                 
-                aqi_data = {
-                    "aqi": current.get("us_aqi", current.get("european_aqi", 50)),
-                    "lat": lat,
-                    "lng": lng,
-                    "pm25": current.get("pm2_5"),
-                    "pm10": current.get("pm10"),
-                    "o3": current.get("ozone"),
-                    "no2": current.get("nitrogen_dioxide"),
-                    "so2": current.get("sulphur_dioxide"),
-                    "co": current.get("carbon_monoxide"),
-                    "timestamp": datetime.now().isoformat()
-                }
+                from ..models.aqi import AQIData
+                aqi_data = AQIData(
+                    aqi=current.get("us_aqi", current.get("european_aqi", 50)),
+                    latitude=lat,
+                    longitude=lng,
+                    pm25=current.get("pm2_5"),
+                    pm10=current.get("pm10"),
+                    o3=current.get("ozone"),
+                    no2=current.get("nitrogen_dioxide"),
+                    so2=current.get("sulphur_dioxide"),
+                    co=current.get("carbon_monoxide"),
+                    location_name=None,
+                    source="openmeteo"
+                )
                 
                 # Cache the data
                 await self.db.cache_aqi_data(aqi_data)

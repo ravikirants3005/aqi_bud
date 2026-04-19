@@ -90,14 +90,28 @@ class AqiData extends Equatable {
   }
 
   factory AqiData.fromJson(Map<String, dynamic> json) {
+    // Handle both lat/lng (frontend) and latitude/longitude (backend) field names
+    final lat = json['lat'] ?? json['latitude'];
+    final lng = json['lng'] ?? json['longitude'];
+    final locationName = json['locationName'] ?? json['location_name'];
+    
+    // Handle timestamp - could be String or DateTime
+    final timestampRaw = json['timestamp'];
+    DateTime timestamp;
+    if (timestampRaw is String) {
+      timestamp = DateTime.parse(timestampRaw);
+    } else {
+      timestamp = DateTime.now();
+    }
+    
     return AqiData(
-      aqi: json['aqi'] as int,
-      lat: (json['lat'] as num).toDouble(),
-      lng: (json['lng'] as num).toDouble(),
-      timestamp: DateTime.parse(json['timestamp'] as String),
+      aqi: (json['aqi'] as num?)?.toInt() ?? 0,
+      lat: (lat as num).toDouble(),
+      lng: (lng as num).toDouble(),
+      timestamp: timestamp,
       pm25: (json['pm25'] as num?)?.toDouble(),
       pm10: (json['pm10'] as num?)?.toDouble(),
-      locationName: json['locationName'] as String?,
+      locationName: locationName as String?,
     );
   }
 

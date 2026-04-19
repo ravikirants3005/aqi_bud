@@ -5,6 +5,7 @@ Configuration settings for AQI Buddy Backend
 import os
 import json
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import List, Optional
 
 class Settings(BaseSettings):
@@ -22,6 +23,19 @@ class Settings(BaseSettings):
     # CORS Configuration
     allowed_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
     
+    @field_validator('allowed_origins', mode='before')
+    @classmethod
+    def parse_allowed_origins(cls, v):
+        """Parse ALLOWED_ORIGINS from JSON string or comma-separated string"""
+        if isinstance(v, str):
+            try:
+                # Try JSON format: ["http://localhost:3000", ...]
+                return json.loads(v)
+            except json.JSONDecodeError:
+                # Try comma-separated format: http://localhost:3000,http://localhost:8000
+                return [origin.strip() for origin in v.split(',')]
+        return v
+    
     # Push Notification Configuration
     push_notifications_enabled: bool = False
     firebase_server_key: Optional[str] = None
@@ -36,9 +50,14 @@ class Settings(BaseSettings):
     # Logging Configuration
     log_level: str = "INFO"
     
+    # External API Keys
+    aqi_api_key: Optional[str] = None
+    openaq_api_key: Optional[str] = None
+    
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # Ignore extra fields from .env
 
 def get_settings() -> Settings:
     """Get application settings"""
