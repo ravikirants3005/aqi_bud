@@ -297,10 +297,16 @@ class UserProfileNotifier extends StateNotifier<UserProfile?> {
       );
 
       for (final item in toCreate) {
-        await backendRepo.saveLocationBackend(item);
+        final success = await backendRepo.saveLocationBackend(item);
+        if (!success) {
+          throw Exception('Failed to save location: ${item.name}');
+        }
       }
       for (final item in toDelete) {
-        await backendRepo.deleteLocationBackend(item.id);
+        final success = await backendRepo.deleteLocationBackend(item.id);
+        if (!success) {
+          throw Exception('Failed to delete location: ${item.name}');
+        }
       }
     }
   }

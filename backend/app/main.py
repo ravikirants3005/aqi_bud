@@ -11,6 +11,7 @@ from typing import List, Optional, Dict, Any
 import asyncio
 import datetime
 import os
+import json
 from dotenv import load_dotenv
 import logging
 
@@ -21,6 +22,13 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Parse CORS origins from env
+_allowed_origins = os.getenv("ALLOWED_ORIGINS", '["http://localhost:3000"]')
+try:
+    origins = json.loads(_allowed_origins)
+except json.JSONDecodeError:
+    origins = [o.strip() for o in _allowed_origins.split(",")]
+
 app = FastAPI(
     title="AQI Buddy API",
     description="Backend for AQI Buddy - Air Quality monitoring with Supabase",
@@ -28,7 +36,6 @@ app = FastAPI(
 )
 
 # CORS middleware
-origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -41,7 +48,6 @@ app.add_middleware(
 security = HTTPBearer()
 
 # Import modules
-from .core.config import get_settings
 from .core.database import get_db
 from .core.security import get_current_user
 from .models.user import UserProfile
@@ -52,7 +58,6 @@ from .services.notification_service import NotificationService
 from .services.supabase_service import SupabaseService
 
 # Initialize services
-settings = get_settings()
 aqi_service = AQIService()
 notification_service = NotificationService()
 supabase_service = SupabaseService()
