@@ -82,6 +82,7 @@ class UserProfile extends Equatable {
   final String? ageGroup;
   final List<SavedLocation> savedLocations;
   final NotificationPreferences notificationPrefs;
+  final String? pushToken;
 
   const UserProfile({
     required this.id,
@@ -93,6 +94,7 @@ class UserProfile extends Equatable {
     this.ageGroup,
     this.savedLocations = const [],
     this.notificationPrefs = const NotificationPreferences(),
+    this.pushToken,
   });
 
   UserProfile copyWith({
@@ -105,6 +107,7 @@ class UserProfile extends Equatable {
     String? ageGroup,
     List<SavedLocation>? savedLocations,
     NotificationPreferences? notificationPrefs,
+    String? pushToken,
   }) => UserProfile(
     id: id ?? this.id,
     email: email ?? this.email,
@@ -115,6 +118,7 @@ class UserProfile extends Equatable {
     ageGroup: ageGroup ?? this.ageGroup,
     savedLocations: savedLocations ?? this.savedLocations,
     notificationPrefs: notificationPrefs ?? this.notificationPrefs,
+    pushToken: pushToken ?? this.pushToken,
   );
 
   Map<String, dynamic> toJson() {
@@ -127,6 +131,7 @@ class UserProfile extends Equatable {
       'healthSensitivity': healthSensitivity.name,
       'ageGroup': ageGroup,
       'savedLocations': savedLocations.map((l) => l.toJson()).toList(),
+      'pushToken': pushToken,
       'notificationPrefs': {
         'highAqiAlerts': notificationPrefs.highAqiAlerts,
         'dailyExposureSummary': notificationPrefs.dailyExposureSummary,
@@ -170,11 +175,23 @@ class UserProfile extends Equatable {
       ageGroup: json['ageGroup'] ?? json['age_group'] as String?,
       savedLocations: savedLocations,
       notificationPrefs: notificationPrefs,
+      pushToken: json['pushToken'] as String?,
     );
   }
 
   @override
-  List<Object?> get props => [id];
+  List<Object?> get props => [
+    id,
+    email,
+    phone,
+    displayName,
+    photoUrl,
+    healthSensitivity,
+    ageGroup,
+    savedLocations,
+    notificationPrefs,
+    pushToken,
+  ];
 }
 
 class NotificationPreferences extends Equatable {

@@ -3,10 +3,12 @@ Database connection and utilities for Supabase
 """
 
 import os
-import httpx
-from typing import Dict, List, Any, Optional
-from datetime import datetime, date
 import logging
+from datetime import datetime, date, timedelta
+from uuid import uuid4
+from typing import Dict, List, Any, Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,15 @@ class SupabaseDB:
             "Content-Type": "application/json",
             "Prefer": "return=representation"
         }
+
+    def _new_id(self) -> str:
+        return str(uuid4())
+
+    def _first(self, payload: Dict[str, Any], *keys: str, default: Any = None) -> Any:
+        for key in keys:
+            if key in payload and payload[key] is not None:
+                return payload[key]
+        return default
     
     async def _make_request(self, method: str, endpoint: str, **kwargs) -> Any:
         """Make HTTP request to Supabase"""
@@ -61,7 +72,19 @@ class SupabaseDB:
     async def create_user_profile(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create user profile in users table"""
         profile_data = {
-            **user_data,
+            "id": self._first(user_data, "id", default=self._new_id()),
+            "email": self._first(user_data, "email"),
+            "phone": self._first(user_data, "phone"),
+            "display_name": self._first(user_data, "display_name", "displayName", default="User"),
+            "health_sensitivity": self._first(user_data, "health_sensitivity", "healthSensitivity", default="normal"),
+            "age_group": self._first(user_data, "age_group", "ageGroup"),
+            "push_token": self._first(user_data, "push_token", "pushToken"),
+            "notification_prefs": self._first(user_data, "notification_prefs", "notificationPrefs", default={
+                "highAqiAlerts": True,
+                "dailyExposureSummary": True,
+                "weeklyInsights": True,
+                "tipOfDay": False,
+            }),
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat()
         }
@@ -84,9 +107,31 @@ class SupabaseDB:
     async def update_user_profile(self, user_id: str, profile_data: Dict[str, Any]) -> Dict[str, Any]:
         """Update user profile"""
         update_data = {
-            **profile_data,
+            "email": self._first(profile_data, "email"),
+            "phone": self._first(profile_data, "phone"),
+            "display_name": self._first(profile_data, "display_name", "displayName"),
+            "health_sensitivity": self._first(profile_data, "health_sensitivity", "healthSensitivity"),
+            "age_group": self._first(profile_data, "age_group", "ageGroup"),
+            "push_token": self._first(profile_data, "push_token", "pushToken"),
+            "notification_prefs": self._first(profile_data, "notification_prefs", "notificationPrefs"),
             "updated_at": datetime.utcnow().isoformat()
         }
+
+        if self._first(profile_data, "notification_prefs", "notificationPrefs") is None:
+            update_data.pop("notification_prefs")
+
+        if self._first(profile_data, "email") is None:
+            update_data.pop("email")
+        if self._first(profile_data, "phone") is None:
+            update_data.pop("phone")
+        if self._first(profile_data, "display_name", "displayName") is None:
+            update_data.pop("display_name")
+        if self._first(profile_data, "health_sensitivity", "healthSensitivity") is None:
+            update_data.pop("health_sensitivity")
+        if self._first(profile_data, "age_group", "ageGroup") is None:
+            update_data.pop("age_group")
+        if self._first(profile_data, "push_token", "pushToken") is None:
+            update_data.pop("push_token")
         
         return await self._make_request(
             "PATCH",
@@ -99,7 +144,13 @@ class SupabaseDB:
     async def create_exposure_record(self, exposure_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create exposure record"""
         record_data = {
-            **exposure_data,
+            "id": self._first(exposure_data, "id", default=self._new_id()),
+            "user_id": self._first(exposure_data, "user_id", "userId"),
+            "date": self._first(exposure_data, "date", "record_date", "recordDate"),
+            "score": self._first(exposure_data, "score", "total_exposure_score", "totalExposureScore", default=0),
+            "max_aqi": self._first(exposure_data, "max_aqi", "maxAqi", default=0),
+            "outdoor_minutes": self._first(exposure_data, "outdoor_minutes", "outdoorMinutes", default=0),
+            "location_exposures": self._first(exposure_data, "location_exposures", "locationExposures", default=[]),
             "created_at": datetime.utcnow().isoformat()
         }
         
@@ -107,7 +158,7 @@ class SupabaseDB:
     
     async def get_exposure_records(self, user_id: str, days: int = 30) -> List[Dict[str, Any]]:
         """Get user's exposure records for last N days"""
-        cutoff_date = (datetime.utcnow() - datetime.timedelta(days=days)).date().isoformat()
+        cutoff_date = (datetime.utcnow() - timedelta(days=days)).date().isoformat()
         
         return await self._make_request(
             "GET",
@@ -123,7 +174,13 @@ class SupabaseDB:
     async def create_saved_location(self, location_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create saved location"""
         location_record = {
-            **location_data,
+            "id": self._first(location_data, "id", default=self._new_id()),
+            "user_id": self._first(location_data, "user_id", "userId"),
+            "name": self._first(location_data, "name", default="Saved location"),
+            "lat": self._first(location_data, "lat"),
+            "lng": self._first(location_data, "lng"),
+            "last_aqi": self._first(location_data, "last_aqi", "lastAqi"),
+            "last_updated": self._first(location_data, "last_updated", "lastUpdated"),
             "created_at": datetime.utcnow().isoformat()
         }
         

@@ -195,19 +195,19 @@ async def get_user_id(credentials: HTTPAuthorizationCredentials = Depends(securi
 def extract_health_sensitivity(user_data: Dict[str, Any]) -> str:
     """Extract health sensitivity from user metadata"""
     metadata = user_data.get("user_metadata", {})
-    return metadata.get("health_sensitivity", "normal")
+    return metadata.get("health_sensitivity") or metadata.get("healthSensitivity") or "normal"
 
 def extract_display_name(user_data: Dict[str, Any]) -> str:
     """Extract display name from user metadata"""
     metadata = user_data.get("user_metadata", {})
-    return metadata.get("display_name", user_data.get("email", "User"))
+    return metadata.get("display_name") or metadata.get("displayName") or user_data.get("email", "User")
 
 def extract_notification_prefs(user_data: Dict[str, Any]) -> Dict[str, bool]:
     """Extract notification preferences from user metadata"""
     metadata = user_data.get("user_metadata", {})
     return {
-        "high_aqi_alerts": metadata.get("high_aqi_alerts", True),
-        "daily_exposure_summary": metadata.get("daily_exposure_summary", True),
-        "weekly_insights": metadata.get("weekly_insights", True),
-        "tip_of_day": metadata.get("tip_of_day", False)
+        "high_aqi_alerts": metadata.get("high_aqi_alerts", metadata.get("highAqiAlerts", True)),
+        "daily_exposure_summary": metadata.get("daily_exposure_summary", metadata.get("dailyExposureSummary", True)),
+        "weekly_insights": metadata.get("weekly_insights", metadata.get("weeklyInsights", True)),
+        "tip_of_day": metadata.get("tip_of_day", metadata.get("tipOfDay", False))
     }

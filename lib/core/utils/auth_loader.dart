@@ -37,7 +37,11 @@ class _AuthLoaderState extends ConsumerState<AuthLoader> {
     // 1. Load auth first
     await _loadAuth();
 
-    // 2. Then ensure location permission and fetch location
+    // 2. Initialize app services that depend on user/session state
+    await ref.read(userProfileProvider.notifier).initializeNotifications();
+    await ref.read(userProfileProvider.notifier).initializeBackendProfile();
+
+    // 3. Then ensure location permission and fetch location
     await _initializeLocationFlow();
   }
 

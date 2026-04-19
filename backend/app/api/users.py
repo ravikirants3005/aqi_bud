@@ -9,6 +9,7 @@ from typing import Dict, Any
 from ..core.security import get_current_user
 from ..core.database import get_db
 from ..services.supabase_service import SupabaseService
+from ..core.serializers import serialize_user_profile
 
 router = APIRouter()
 
@@ -31,7 +32,7 @@ async def get_user_profile(current_user: Dict = Depends(get_current_user)):
         }
         profile = await db.create_user_profile(profile_data)
     
-    return profile
+    return serialize_user_profile(profile)
 
 @router.put("/profile")
 async def update_user_profile(profile_data: Dict[str, Any], current_user: Dict = Depends(get_current_user)):
@@ -40,10 +41,10 @@ async def update_user_profile(profile_data: Dict[str, Any], current_user: Dict =
     db = get_db()
     
     # Add user_id from authenticated token
-    profile_data["id"] = user_id
+    profile_data = {**profile_data, "id": user_id}
     
     updated_profile = await db.update_user_profile(user_id, profile_data)
-    return {"message": "Profile updated successfully", "profile": updated_profile}
+    return {"message": "Profile updated successfully", "profile": serialize_user_profile(updated_profile)}
 
 @router.get("/analytics")
 async def get_user_analytics(current_user: Dict = Depends(get_current_user)):

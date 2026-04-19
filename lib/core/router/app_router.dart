@@ -9,6 +9,7 @@ import '../../features/auth/screens/register_screen.dart';
 import '../../features/education/screens/education_screen.dart';
 import '../../features/health_tips/screens/health_tips_screen.dart';
 import '../../features/home/screens/home_screen.dart';
+import '../../features/home/screens/notification_test_screen.dart';
 import '../../features/insights/screens/insights_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
 import '../../features/profile/screens/saved_locations_screen.dart';
@@ -20,14 +21,8 @@ final goRouter = GoRouter(
   navigatorKey: rootNavigatorKey,
   initialLocation: '/',
   routes: [
-    GoRoute(
-      path: '/',
-      builder: (context, state) => const HomeScreen(),
-    ),
-    GoRoute(
-      path: '/login',
-      builder: (context, state) => const LoginScreen(),
-    ),
+    GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+    GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
     GoRoute(
       path: '/register',
       builder: (context, state) => const RegisterScreen(),
@@ -55,6 +50,10 @@ final goRouter = GoRouter(
     GoRoute(
       path: '/saved-locations',
       builder: (context, state) => const SavedLocationsScreen(),
+    ),
+    GoRoute(
+      path: '/notification-test',
+      builder: (context, state) => const NotificationTestScreen(),
     ),
   ],
 );

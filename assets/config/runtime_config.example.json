@@ -1,4 +1,6 @@
 {
   "aqiProvider": "openaq",
-  "aqiApiKey": "712871a69cee6e74b70420d99756b657d6d46fb856b938c16eeff3895da53082"
+  "aqiApiKey": "YOUR_AQI_API_KEY",
+  "backendBaseUrl": "http://10.0.2.2:8000",
+  "onesignalAppId": "YOUR_ONESIGNAL_APP_ID"
 }

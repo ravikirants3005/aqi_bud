@@ -147,17 +147,16 @@ final aqiForecastProvider = FutureProvider<List<Map<String, dynamic>>>((
   final week = trends['week'] ?? const <AqiTrendDay>[];
   if (week.isEmpty) return const <Map<String, dynamic>>[];
 
-  final rows =
-      week
-          .map(
-            (day) => <String, dynamic>{
-              'date':
-                  '${day.date.year.toString().padLeft(4, '0')}-${day.date.month.toString().padLeft(2, '0')}-${day.date.day.toString().padLeft(2, '0')}',
-              'aqi': day.avgAqi,
-              'pm25': '-',
-            },
-          )
-          .toList();
+  final rows = week
+      .map(
+        (day) => <String, dynamic>{
+          'date':
+              '${day.date.year.toString().padLeft(4, '0')}-${day.date.month.toString().padLeft(2, '0')}-${day.date.day.toString().padLeft(2, '0')}',
+          'aqi': day.avgAqi,
+          'pm25': '-',
+        },
+      )
+      .toList();
 
   return rows;
 });
@@ -192,6 +191,7 @@ final exposureDashboardProvider = FutureProvider<ExposureDashboardData?>((
   final sensitivity = profile?.healthSensitivity ?? HealthSensitivity.normal;
   final aqiRepo = ref.watch(aqiRepoProvider);
   final exposureRepo = ref.watch(exposureRepoProvider);
+  final backendRepo = ref.watch(backendRepositoryProvider);
 
   final locationCurrentAqiEntries = await Future.wait(
     savedLocations.map((location) async {
@@ -206,7 +206,7 @@ final exposureDashboardProvider = FutureProvider<ExposureDashboardData?>((
     }),
   );
 
-  return exposureRepo.buildDashboard(
+  final dashboard = await exposureRepo.buildDashboard(
     currentAqi: currentAqi,
     weeklyTrend: trends['week'] ?? const <AqiTrendDay>[],
     monthlyTrend: trends['month'] ?? const <AqiTrendDay>[],
@@ -219,6 +219,12 @@ final exposureDashboardProvider = FutureProvider<ExposureDashboardData?>((
       for (final entry in locationTrendEntries) entry.key: entry.value,
     },
   );
+
+  if ((profile?.id ?? 'guest') != 'guest') {
+    await backendRepo.recordExposureBackend(dashboard.todayRecord);
+  }
+
+  return dashboard;
 });
 
 final userProfileProvider =
@@ -240,9 +246,18 @@ class UserProfileNotifier extends StateNotifier<UserProfile?> {
     healthSensitivity: HealthSensitivity.normal,
   );
 
+  Future<void> _persistProfile(UserProfile profile) async {
+    if (profile.id == 'guest') return;
+
+    _auth.updateProfile(profile);
+    await ref.read(backendRepositoryProvider).updateUserProfile(profile);
+  }
+
   void setProfile(UserProfile p) {
     state = p;
-    if (p.id != 'guest') _auth.updateProfile(p);
+    if (p.id != 'guest') {
+      unawaited(_persistProfile(p));
+    }
   }
 
   void clear() {
@@ -251,25 +266,51 @@ class UserProfileNotifier extends StateNotifier<UserProfile?> {
 
   Future<void> signOut() async {
     await _auth.signOut();
+    await ref.read(notificationRepositoryProvider).cancelAll();
     state = _defaultGuest;
   }
 
   void updateSensitivity(HealthSensitivity s) {
     final next = (state ?? _defaultGuest).copyWith(healthSensitivity: s);
     state = next;
-    if (next.id != 'guest') _auth.updateProfile(next);
+    if (next.id != 'guest') {
+      unawaited(_persistProfile(next));
+    }
   }
 
-  void updateSavedLocations(List<SavedLocation> locs) {
-    final next = (state ?? _defaultGuest).copyWith(savedLocations: locs);
+  Future<void> updateSavedLocations(List<SavedLocation> locs) async {
+    final previous = state ?? _defaultGuest;
+    final next = previous.copyWith(savedLocations: locs);
     state = next;
-    if (next.id != 'guest') _auth.updateProfile(next);
+    if (next.id != 'guest') {
+      _auth.updateProfile(next);
+
+      final backendRepo = ref.read(backendRepositoryProvider);
+      final previousById = {
+        for (final item in previous.savedLocations) item.id: item,
+      };
+      final nextById = {for (final item in locs) item.id: item};
+
+      final toCreate = locs.where((item) => !previousById.containsKey(item.id));
+      final toDelete = previous.savedLocations.where(
+        (item) => !nextById.containsKey(item.id),
+      );
+
+      for (final item in toCreate) {
+        await backendRepo.saveLocationBackend(item);
+      }
+      for (final item in toDelete) {
+        await backendRepo.deleteLocationBackend(item.id);
+      }
+    }
   }
 
   void updateNotificationPrefs(NotificationPreferences p) {
     final next = (state ?? _defaultGuest).copyWith(notificationPrefs: p);
     state = next;
-    if (next.id != 'guest') _auth.updateProfile(next);
+    if (next.id != 'guest') {
+      unawaited(_persistProfile(next));
+    }
   }
 
   Future<void> initializeNotifications() async {
@@ -286,7 +327,26 @@ class UserProfileNotifier extends StateNotifier<UserProfile?> {
   }
 
   Future<void> initializeBackendProfile() async {
+    final current = state;
+    if (current == null || current.id == 'guest') return;
+
     final backendRepo = ref.read(backendRepositoryProvider);
     await backendRepo.initializeUserProfile();
+
+    final backendProfile = await backendRepo.getUserProfile();
+    if (backendProfile != null) {
+      state = backendProfile;
+      await _auth.updateProfile(backendProfile);
+    }
+
+    final backendLocations = await backendRepo.getSavedLocationsBackend();
+    if (backendLocations.isNotEmpty ||
+        (state?.savedLocations.isNotEmpty ?? false)) {
+      final merged = (state ?? current).copyWith(
+        savedLocations: backendLocations,
+      );
+      state = merged;
+      await _auth.updateProfile(merged);
+    }
   }
 }

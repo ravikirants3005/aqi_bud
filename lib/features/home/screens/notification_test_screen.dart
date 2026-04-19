@@ -1,13 +1,12 @@
-/// Notification Test Screen - Test push notifications
+/// Notification Test Screen - Test local notifications
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/notifications/notification_service.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../data/models/exposure_models.dart';
-import '../../../data/models/user_models.dart';
+import '../../../domain/providers/app_providers.dart';
 
 class NotificationTestScreen extends ConsumerStatefulWidget {
   const NotificationTestScreen({super.key});
@@ -19,118 +18,81 @@ class NotificationTestScreen extends ConsumerStatefulWidget {
 
 class _NotificationTestScreenState
     extends ConsumerState<NotificationTestScreen> {
-  final NotificationService _notificationService = NotificationService();
-  bool _isInitialized = false;
+  bool _isSending = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _initializeNotifications();
-  }
+  Future<void> _sendTestNotification(String type) async {
+    if (_isSending) return;
 
-  Future<void> _initializeNotifications() async {
-    try {
-      await _notificationService.initialize();
-      setState(() {
-        _isInitialized = true;
-      });
-    } catch (e) {
-      print('Error initializing notifications: $e');
-    }
-  }
-
-  Future<void> _sendHighAqiAlert() async {
-    if (!_isInitialized) return;
+    setState(() {
+      _isSending = true;
+    });
 
     try {
-      await _notificationService.sendHighAqiAlert(
-        aqi: 150,
-        location: "New York City",
-        sensitivity: HealthSensitivity.normal,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('High AQI alert sent!')));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    }
-  }
-
-  Future<void> _sendDailySummary() async {
-    if (!_isInitialized) return;
-
-    try {
-      await _notificationService.sendDailyExposureSummary(
-        todayRecord: ExposureRecord(
-          id: 'test_${DateTime.now().millisecondsSinceEpoch}',
-          date: DateTime.now(),
-          score: 75.5,
-          maxAqi: 120,
-          outdoorMinutes: const Duration(minutes: 180),
-          locationExposures: [
-            LocationExposure(
-              lat: 40.7128,
-              lng: -74.0060,
-              name: "Central Park",
-              aqi: 120,
-              duration: const Duration(minutes: 120),
+      final notificationRepo = ref.read(notificationRepositoryProvider);
+      switch (type) {
+        case 'high_aqi':
+          await notificationRepo.sendHighAqiAlert(
+            aqi: 178,
+            location: 'Current location',
+            sensitivity: HealthSensitivity.sensitive,
+          );
+          break;
+        case 'daily_summary':
+          await notificationRepo.sendDailyExposureSummary(
+            todayRecord: ExposureRecord(
+              id: 'test-daily',
+              date: DateTime.now(),
+              score: 69,
+              maxAqi: 142,
             ),
-          ],
-        ),
-        safeLimit: 100.0,
-        sensitivity: HealthSensitivity.normal,
-      );
+            safeLimit: 58,
+            sensitivity: HealthSensitivity.sensitive,
+          );
+          break;
+        case 'weekly_insights':
+          await notificationRepo.sendWeeklyInsights(
+            weeklyExposure: [
+              ExposureRecord(
+                id: 'test-week-1',
+                date: DateTime(2026, 1, 1),
+                score: 72,
+                maxAqi: 160,
+              ),
+              ExposureRecord(
+                id: 'test-week-2',
+                date: DateTime(2026, 1, 2),
+                score: 64,
+                maxAqi: 122,
+              ),
+            ],
+            highAqiDays: 3,
+            sensitivity: HealthSensitivity.sensitive,
+          );
+          break;
+        default:
+          throw StateError('Unknown notification type: $type');
+      }
 
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Daily summary sent!')));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    }
-  }
-
-  Future<void> _sendWeeklyInsights() async {
-    if (!_isInitialized) return;
-
-    try {
-      await _notificationService.sendWeeklyInsights(
-        weeklyExposure: [
-          ExposureRecord(
-            id: 'test_weekly_${DateTime.now().millisecondsSinceEpoch}',
-            date: DateTime.now().subtract(const Duration(days: 1)),
-            score: 65.5,
-            maxAqi: 110,
-            outdoorMinutes: const Duration(minutes: 150),
-            locationExposures: const [],
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Local test notification sent. Check your device notification tray.',
+            ),
           ),
-        ],
-        highAqiDays: 2,
-        sensitivity: HealthSensitivity.normal,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Weekly insights sent!')));
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
       }
     }
   }
@@ -142,42 +104,44 @@ class _NotificationTestScreenState
       appBar: AppBar(
         backgroundColor: const Color(0xFF060E20),
         foregroundColor: Colors.white,
-        title: const Text('Test Notifications'),
+        title: const Text('Test Local Notifications'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Status
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: _isInitialized
-                    ? Colors.green.withValues(alpha: 0.2)
-                    : Colors.orange.withValues(alpha: 0.2),
+                color: Colors.green.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: _isInitialized ? Colors.green : Colors.orange,
-                ),
+                border: Border.all(color: Colors.green),
               ),
               child: Row(
                 children: [
-                  Icon(
-                    _isInitialized ? Icons.check_circle : Icons.warning,
-                    color: _isInitialized ? Colors.green : Colors.orange,
-                  ),
+                  const Icon(Icons.check_circle, color: Colors.green),
                   const SizedBox(width: 12),
-                  Text(
-                    _isInitialized
-                        ? 'Notifications initialized'
-                        : 'Initializing notifications...',
-                    style: TextStyle(
-                      color: _isInitialized ? Colors.green : Colors.orange,
-                      fontWeight: FontWeight.w600,
+                  Expanded(
+                    child: Text(
+                      'Using flutter_local_notifications for on-device alerts.',
+                      style: const TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            const Text(
+              'Tap any button below to trigger a local test notification.',
+              style: TextStyle(
+                color: Colors.white70,
+                fontWeight: FontWeight.w500,
               ),
             ),
 
@@ -189,33 +153,34 @@ class _NotificationTestScreenState
                 children: [
                   _NotificationTestButton(
                     title: 'High AQI Alert',
-                    description: 'Test high AQI warning notification',
+                    description:
+                        'Trigger a local high AQI alert on this device',
                     icon: Icons.warning,
                     color: Colors.red,
-                    onPressed: _sendHighAqiAlert,
-                    enabled: _isInitialized,
+                    onPressed: () => _sendTestNotification('high_aqi'),
+                    enabled: !_isSending,
                   ),
 
                   const SizedBox(height: 12),
 
                   _NotificationTestButton(
                     title: 'Daily Summary',
-                    description: 'Test daily exposure summary',
+                    description: 'Trigger a local daily summary notification',
                     icon: Icons.today,
                     color: Colors.blue,
-                    onPressed: _sendDailySummary,
-                    enabled: _isInitialized,
+                    onPressed: () => _sendTestNotification('daily_summary'),
+                    enabled: !_isSending,
                   ),
 
                   const SizedBox(height: 12),
 
                   _NotificationTestButton(
                     title: 'Weekly Insights',
-                    description: 'Test weekly insights notification',
+                    description: 'Trigger a local weekly insights notification',
                     icon: Icons.insights,
                     color: Colors.purple,
-                    onPressed: _sendWeeklyInsights,
-                    enabled: _isInitialized,
+                    onPressed: () => _sendTestNotification('weekly_insights'),
+                    enabled: !_isSending,
                   ),
                 ],
               ),
@@ -241,10 +206,10 @@ class _NotificationTestScreenState
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    '1. Press any test button above\n'
-                    '2. Check your phone\'s notification panel\n'
-                    '3. You should see the test notification\n'
-                    '4. Make sure notifications are enabled in settings',
+                    '1. Log in on the phone you want to test\n'
+                    '2. Allow notification permission\n'
+                    '3. Press a test button above to show a local notification\n'
+                    '4. Check the notification tray on that phone',
                     style: TextStyle(color: Colors.white70, fontSize: 14),
                   ),
                 ],

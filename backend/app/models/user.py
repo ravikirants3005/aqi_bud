@@ -12,6 +12,7 @@ class UserProfile(BaseModel):
     display_name: str
     health_sensitivity: str = "normal"
     age_group: Optional[str] = None
+    push_token: Optional[str] = None
     notification_prefs: Dict[str, bool] = {
         "high_aqi_alerts": True,
         "daily_exposure_summary": True,

@@ -8,6 +8,10 @@ from typing import List, Dict, Any
 
 from ..core.security import get_current_user
 from ..core.database import get_db
+from ..core.serializers import (
+    normalize_saved_location_payload,
+    serialize_saved_location,
+)
 
 router = APIRouter()
 
@@ -16,12 +20,12 @@ async def save_location(location_data: Dict[str, Any], current_user: Dict = Depe
     """Save a location for user"""
     user_id = current_user["id"]
     db = get_db()
-    
-    # Add user_id to location data from authenticated token
+    # Add user_id to location data from authenticated token and normalize
     location_data["user_id"] = user_id
-    
-    await db.create_saved_location(location_data)
-    return {"message": "Location saved successfully"}
+    normalized_location = normalize_saved_location_payload(location_data, user_id=user_id)
+    saved_location = await db.create_saved_location(normalized_location)
+    saved_location_row = saved_location[0] if isinstance(saved_location, list) and saved_location else saved_location
+    return {"message": "Location saved successfully", "location": serialize_saved_location(saved_location_row)}
 
 @router.get("/saved")
 async def get_saved_locations(current_user: Dict = Depends(get_current_user)):
@@ -29,7 +33,7 @@ async def get_saved_locations(current_user: Dict = Depends(get_current_user)):
     user_id = current_user["id"]
     db = get_db()
     locations = await db.get_saved_locations(user_id)
-    return {"locations": locations}
+    return {"locations": [serialize_saved_location(location) for location in locations]}
 
 @router.delete("/{location_id}")
 async def delete_saved_location(location_id: str, current_user: Dict = Depends(get_current_user)):

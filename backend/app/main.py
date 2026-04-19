@@ -103,10 +103,24 @@ async def health_check():
 
 # Add missing notification test endpoint
 @app.post("/notifications/test")
-async def test_notification(notification_type: str = "high_aqi"):
+async def test_notification(
+    notification_type: str = "high_aqi",
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """Test notification endpoint"""
+    db = get_db()
+    user_id = current_user.get("id") or current_user.get("sub")
+    user_profile = await db.get_user_profile(user_id) if user_id else None
+
+    delivered = await notification_service.send_test_notification(
+        user_profile or current_user,
+        notification_type,
+    )
+
     return {
         "message": f"Test notification sent: {notification_type}",
+        "delivered": delivered,
+        "user_id": user_id,
         "timestamp": datetime.datetime.now().isoformat()
     }
 
